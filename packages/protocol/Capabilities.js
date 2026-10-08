@@ -2,7 +2,7 @@ import { Reader } from '../binary/Reader.js';
 import { Writer, concat } from '../binary/Writer.js';
 import { requireThat } from '../binary/ProtocolError.js';
 export const capability = (type, body) => new Writer(body.length + 4).u16le(type).u16le(body.length + 4).put(body).finish();
-export function clientCapabilities({ width, height, bpp = 24, keyboardLayout = 0x409 }) {
+export function clientCapabilities({ width, height, bpp = 24, keyboardLayout = 0x409, compression = true }) {
     const general = new Writer().u16le(4).u16le(0).u16le(0x200).u16le(0).u16le(0)
         .u16le(0x405).u16le(0).u16le(0).u16le(0).u8(1).u8(1).finish();
     const bitmap = new Writer().u16le(bpp).u16le(1).u16le(1).u16le(1).u16le(width).u16le(height)
@@ -17,7 +17,8 @@ export function clientCapabilities({ width, height, bpp = 24, keyboardLayout = 0
         capability(9, new Uint8Array(4)),
         capability(10, new Writer().u16le(6).u16le(0).finish()),
         capability(13, input), capability(14, new Writer().u16le(1).u16le(0).finish()),
-        capability(20, new Writer().u32le(0).u32le(1600).finish()),
+        capability(12, new Writer().u16le(1).u16le(0).finish()),
+        capability(20, new Writer().u32le(compression ? 1 : 0).u32le(1600).finish()),
         capability(26, new Writer().u32le(16 * 1024 * 1024).finish())];
 }
 export function parseDemandActive(body) {

@@ -1,3 +1,5 @@
+import { MppcDecoder } from '../packages/codecs/Mppc.js';
+import { ProtocolError } from '../packages/binary/ProtocolError.js';
 import { performance } from 'node:perf_hooks';
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { Reader } from '../packages/binary/Reader.js';
@@ -16,6 +18,8 @@ const rounds = Number(process.env.FUZZ_ROUNDS || 100000);
 if (!Number.isSafeInteger(rounds) || rounds < 1 || rounds > 1000000)
     throw new Error('FUZZ_ROUNDS must be 1..1000000');
 const methods = {
+    mppc8: bytes => new MppcDecoder().decode(bytes, 0xa0, 2048),
+    mppc64: bytes => new MppcDecoder().decode(bytes, 0xa1, 2048),
     framing: bytes => new Framer(() => { }).push(bytes),
     fastPath: bytes => new FastPath(() => { }, 65536).push(bytes),
     asn1: bytes => readTlv(new Reader(bytes)),
@@ -39,7 +43,7 @@ for (let i = 0; i < rounds; i++) {
     }
     catch (error) {
         counters[name].rejected++;
-        if (!(error instanceof Error) || (error instanceof TypeError && /undefined|not a function/.test(error.message))) {
+        if (!(error instanceof ProtocolError) && !(error instanceof TypeError && error.code === 'ERR_ENCODING_INVALID_ENCODED_DATA')) {
             unexpected++;
             console.error(name, Buffer.from(bytes).toString('hex'), error);
         }
