@@ -1,3 +1,4 @@
+import { MppcDecoder } from '../codecs/Mppc.js';
 import { Reader } from '../binary/Reader.js';
 import { Writer } from '../binary/Writer.js';
 import { ProtocolError, requireThat } from '../binary/ProtocolError.js';
@@ -24,9 +25,10 @@ export class Session {
         this.state = 'new';
         this.channels = [...(this.options.clipboard ? ['cliprdr'] : []), ...(this.options.resize ? ['drdynvc'] : [])];
         this.framer = new Framer((packet, kind) => this.packet(packet, kind));
-        this.fastPath = new FastPath((code, bytes) => this.fastUpdate(code, bytes));
+        this.bulk = this.options.compression === false ? null : new MppcDecoder();
+        this.fastPath = new FastPath((code, bytes) => this.fastUpdate(code, bytes), 16 * 1024 * 1024, this.bulk);
         this.pointer = new PointerCache(value => this.emit({ ...value, kind: value.type, type: 'pointer' }));
-        this.staticChannels = new StaticChannels((id, bytes) => this.channelSend(id, bytes));
+        this.staticChannels = new StaticChannels((id, bytes) => this.channelSend(id, bytes), 16 * 1024 * 1024, this.bulk);
         this.receivedBytes = 0;
         this.receivedPackets = 0;
         this.bitmapBytes = 0;
@@ -159,7 +161,7 @@ export class Session {
             return;
         }
         requireThat(type === 7, 'SHARE_TYPE', `Unsupported Share Control PDU ${type}`);
-        const p = parseShareData(body);
+        const p = parseShareData(body, this.bulk);
         if (this.shareId !== undefined)
             requireThat(p.shareId === this.shareId, 'SHARE_ID', 'Mismatched desktop share');
         switch (p.type) {
@@ -209,9 +211,14 @@ export class Session {
             case 55:
                 this.emit({ type: 'server-status', bytes: p.data.length });
                 break;
-            case 36:
-                this.emit({ type: 'bell' });
-                break;
+            case 34: {
+                const r = new Reader(p.data), duration = r.u32le(), frequency = r.u32le(); r.end();
+                this.emit({ type: 'bell', duration, frequency }); break;
+            }
+            case 54: {
+                const r = new Reader(p.data), status = r.u32le(); r.end();
+                this.emit({ type: 'status', status }); break;
+            }
             default: throw new ProtocolError('DATA_PDU', `Unimplemented Share Data PDU ${p.type}`);
         }
     }
@@ -308,7 +315,7 @@ export class Session {
         this.dispose();
         this.emit({ type: 'error', code: error.code || 'PROTOCOL_ERROR', message: error.message });
     }
-    dispose() { this.options.password = ''; this.staticChannels.close(); this.fastPath.clear(); this.framer.clear(); this.pointer.clear(); }
+    dispose() { this.options.password = ''; this.staticChannels.close(); this.bulk?.reset(); this.fastPath.clear(); this.framer.clear(); this.pointer.clear(); }
     close() {
         if (this.state === 'closed')
             return;

@@ -6,7 +6,7 @@ export function shareControl(type, source, body) {
     return new Writer(body.length + 6).u16le(body.length + 6).u16le(0x10 | type).u16le(source).put(body).finish();
 }
 export function shareData(shareId, source, type, body) {
-    return shareControl(7, source, new Writer().u32le(shareId).u8(0).u8(1).u16le(body.length + 12)
+    return shareControl(7, source, new Writer().u32le(shareId).u8(0).u8(1).u16le(body.length + 18)
         .u8(type).u8(0).u16le(0).put(body).finish());
 }
 export function parseShare(bytes, onPdu) {
@@ -19,12 +19,26 @@ export function parseShare(bytes, onPdu) {
         onPdu(type & 15, source, p.take(p.remaining));
     }
 }
-export function parseShareData(bytes) {
+/** A single connection-wide decoder must be supplied for all bulk streams. */
+export function parseShareData(bytes, bulk = null) {
     const r = new Reader(bytes), shareId = r.u32le();
     r.u8();
     const streamId = r.u8(), uncompressedLength = r.u16le(), type = r.u8(), compression = r.u8(), compressedLength = r.u16le();
-    requireThat(compression === 0, 'BULK_COMPRESSION', 'Server used bulk compression although it was not negotiated');
-    requireThat(uncompressedLength === bytes.length, 'SHARE_DATA_LENGTH', 'Invalid Share Data uncompressed length');
-    requireThat(compressedLength === 0, 'SHARE_DATA_LENGTH', 'Unexpected compressed length');
-    return { shareId, streamId, type, data: r.take(r.remaining) };
+    requireThat([1, 2, 4].includes(streamId) || streamId === 0 && type === 31, 'SHARE_STREAM', 'Invalid Share Data stream');
+    let data = r.take(r.remaining);
+    if (compression) {
+        requireThat(bulk, 'UNSUPPORTED_BULK', 'Server sent unnegotiated bulk data');
+        if (compression & 0x20) {
+            requireThat(compressedLength === bytes.length + 6 && uncompressedLength >= 18, 'DATA_LENGTH', 'Invalid compressed Share Data lengths');
+            data = bulk.decode(data, compression, uncompressedLength - 18);
+            requireThat(data.length === uncompressedLength - 18, 'DATA_LENGTH', 'Bulk output does not match Share Data length');
+        } else {
+            requireThat(compressedLength === 0, 'DATA_LENGTH', 'Unexpected compressed length');
+            data = bulk.decode(data, compression, 65535);
+        }
+    } else requireThat(compressedLength === 0, 'DATA_LENGTH', 'Unexpected compressed length');
+    // Raw framing is authoritative. Accept full-PDU and Share-Data-only
+    // length conventions, but emit the full-PDU length.
+    if (!(compression & 0x20)) requireThat(uncompressedLength === bytes.length || uncompressedLength === bytes.length + 6, 'SHARE_DATA_LENGTH', 'Invalid raw Share Data length');
+    return { shareId, streamId, type, uncompressedLength, data };
 }

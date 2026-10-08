@@ -1,0 +1,71 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { MppcDecoder } from '../packages/codecs/Mppc.js';
+import { Writer } from '../packages/binary/Writer.js';
+import { parseShareData, shareControl, shareData } from '../packages/protocol/Share.js';
+import { FastPath } from '../packages/protocol/FastPath.js';
+import { StaticChannels } from '../packages/channels/StaticChannels.js';
+import { Session } from '../packages/protocol/Session.js';
+import { LoopbackServer } from '../packages/lab/LoopbackServer.js';
+import { clientInfo } from '../packages/protocol/ClientInfo.js';
+import * as Mcs from '../packages/protocol/Mcs.js';
+import { mppcFixture } from './helpers/MppcFixture.js';
+const text=b=>new TextDecoder().decode(b);
+const sd=(data,size,flags=0xa1,type=2)=>new Writer().u32le(0x103ea).u8(0).u8(1).u16le(size+18).u8(type).u8(flags).u16le(data.length+18).put(data).finish();
+const fast=(header,data,flags=0x21)=>new Writer().u8(0).u8(data.length+6).u8(header|0x80).u8(flags).u16le(data.length).put(data).finish();
+const vc=(size,flags,data)=>new Writer().u32le(size).u32le(flags).put(data).finish();
+test('Bulk history survives slow-path → fast-path → static-channel switches',()=>{
+    const d=new MppcDecoder(), events=[], channels=new StaticChannels(()=>{}, 16777216, d);
+    channels.register(4,{receive:b=>events.push(text(b))});
+    assert.equal(text(parseShareData(sd(mppcFixture(['abc']),3),d).data),'abc');
+    const f=new FastPath((code,b)=>events.push(text(b)),1024,d);
+    f.push(fast(1,mppcFixture([[3,6]])));
+    channels.receive(4,vc(6,0x00210003,mppcFixture([[6,6]])));
+    assert.deepEqual(events,['abcabc','abcabc']);
+});
+test('Bulk decompression occurs before fast-path and static-channel reassembly',()=>{
+    const d=new MppcDecoder(), outputs=[], f=new FastPath((code,b)=>outputs.push(text(b)),1024,d);
+    f.push(fast(0x21,mppcFixture(['abc']),0xa1));
+    f.push(fast(0x11,mppcFixture([[3,3]])));
+    const c=new StaticChannels(()=>{}, 16777216, d);c.register(1,{receive:b=>outputs.push(text(b))});
+    c.receive(1,vc(6,0x00210001,mppcFixture([[3,3]])));
+    c.receive(1,vc(6,0x00210002,mppcFixture([[3,3]])));
+    assert.deepEqual(outputs,['abcabc','abcabc']);
+});
+test('Compressed headers reject invalid output lengths and unnegotiated codecs',()=>{
+    assert.throws(()=>parseShareData(sd(mppcFixture(['abc']),4),new MppcDecoder()),{code:'DATA_LENGTH'});
+    assert.throws(()=>parseShareData(sd(mppcFixture(['abc']),3)),{code:'UNSUPPORTED_BULK'});
+    const f=new FastPath(()=>{});assert.throws(()=>f.push(fast(1,mppcFixture(['abc']))),{code:'UNSUPPORTED_BULK'});
+});
+test('Client negotiation advertises RDP5 and allows explicit compression disable',()=>{
+    const enabled=new DataView(clientInfo().buffer).getUint32(8,true);
+    const disabled=new DataView(clientInfo({compression:false}).buffer).getUint32(8,true);
+    assert.equal(enabled&0x1e80,0x280);assert.equal(disabled&0x1e80,0);
+});
+test('Session decodes compressed bell on the wire; status is not a bell; close clears history',async()=>{
+    const events=[];let client;
+    const server=new LoopbackServer({send:b=>queueMicrotask(()=>client.receive(b))});
+    client=new Session({options:{selectedProtocol:1,requestedProtocols:1,width:640,height:400},send:b=>queueMicrotask(()=>server.receive(b)),emit:e=>events.push(e)});
+    client.start();for(let i=0;i<20;i++) await new Promise(r=>setImmediate(r));
+    assert.equal(client.state,'active');
+    const sound=new Writer().u32le(250).u32le(880).finish();
+    server.indication(client.ioChannel,shareControl(7,1002,sd(mppcFixture([...sound]),8,0xa1,34)));
+    server.data(54,new Writer().u32le(1).finish());
+    for(let i=0;i<5;i++) await new Promise(r=>setImmediate(r));
+    assert.equal(events.filter(e=>e.type==='bell').length,1);
+    assert.deepEqual(events.find(e=>e.type==='bell'),{type:'bell',duration:250,frequency:880});
+    assert.equal(events.find(e=>e.type==='status').status,1);
+    client.close();server.close();assert.ok(client.bulk.history.every(x=>x===0));
+});
+test('Virtual-channel suspend/resume bounds and owns queued writes',()=>{
+    const sent=[],c=new StaticChannels((id,bytes)=>sent.push(bytes),64);
+    c.register(4,{receive:()=>{}});
+    c.receive(4,vc(0,0x20,new Uint8Array()));
+    const data=Uint8Array.of(1,2,3);c.transmit(4,data);data.fill(0);
+    assert.equal(sent.length,0);assert.equal(c.pendingBytes,3);
+    assert.throws(()=>c.transmit(4,new Uint8Array(62)),{code:'CHANNEL_LIMIT'});
+    c.receive(4,vc(0,0x40,new Uint8Array()));
+    assert.deepEqual([...sent[0].subarray(8)],[1,2,3]);assert.equal(c.pendingBytes,0);
+    assert.throws(()=>c.receive(4,vc(0,0x60,new Uint8Array())),{code:'CHANNEL_FLOW'});
+    c.close();
+});

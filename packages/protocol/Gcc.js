@@ -18,8 +18,8 @@ export function conferenceRequest(options, channels) {
     const net = new Writer().u32le(channels.length);
     for (const channel of channels) {
         requireThat(/^[a-z0-9]{1,7}$/.test(channel), 'CHANNEL_NAME', 'Invalid static channel name');
-        // Initialized + priority-high. Never request virtual-channel bulk compression.
-        net.ascii(channel).zeros(8 - channel.length).u32le(0x88000000);
+        // Server-to-client virtual channels share the negotiated RDP bulk history.
+        net.ascii(channel).zeros(8 - channel.length).u32le(options.compression === false ? 0x88000000 : 0x88800000);
     }
     const blocks = concat(clientCore(options), userDataBlock(GccType.SECURITY, new Uint8Array(8)), userDataBlock(GccType.NETWORK, net.finish()));
     const inner = new Writer().put(Uint8Array.of(0, 8, 0, 16, 0, 1, 0xc0, 0)).ascii('Duca').perLength(blocks.length).put(blocks).finish();
