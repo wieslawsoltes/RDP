@@ -1,7 +1,7 @@
 import { createHmac, randomBytes } from 'node:crypto';
 import { Reader } from '../binary/Reader.js';
 import { Writer, concat, utf16 } from '../binary/Writer.js';
-import { requireThat } from '../binary/ProtocolError.js';
+import { ProtocolError, requireThat } from '../binary/ProtocolError.js';
 import { md4 } from './Md4.js';
 import { Rc4 } from './Rc4.js';
 import { NtlmSeal } from './NtlmSeal.js';
@@ -33,7 +33,7 @@ export function parseAvPairs(bytes) {
         requireThat((type !== 6 || length === 4) && (type !== 7 || length === 8) && (type !== 10 || length === 16), 'NTLM_AV_LENGTH', 'Invalid NTLM AV pair length');
         pairs.set(type, value);
     }
-    throw new Error('NTLM target information lacks a terminator');
+    throw new ProtocolError('NTLM_AV_TERMINATOR', 'NTLM target information lacks a terminator');
 }
 export function encodeAvPairs(pairs) {
     const w = new Writer();
