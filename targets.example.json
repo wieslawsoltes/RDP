@@ -1,0 +1,13 @@
+{
+  "targets": [
+    {
+      "id": "workstation",
+      "name": "Development workstation",
+      "host": "rdp.example.internal",
+      "port": 3389,
+      "serverName": "rdp.example.internal",
+      "caFile": "company-ca.pem",
+      "allowTlsOnly": false
+    }
+  ]
+}
