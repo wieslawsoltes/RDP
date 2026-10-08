@@ -48,7 +48,26 @@ jobs:
           (root / '.git/transfer-message').write_text(message + '\n')
           PY
       - run: npm run check
-      - run: npm test
+      - name: Test and preserve bounded failure diagnostics
+        env:
+          BRANCH: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          if npm test > /tmp/rdp-tests.tap 2>&1; then
+            cat /tmp/rdp-tests.tap
+          else
+            cat /tmp/rdp-tests.tap
+            mkdir -p docs/validation
+            tail -c 65536 /tmp/rdp-tests.tap > docs/validation/import-failure.tap
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git add docs/validation/import-failure.tap
+            if ! git diff --cached --quiet; then
+              git commit -m 'test: preserve import failure diagnostics without publishing unvalidated code'
+              git push origin "HEAD:$BRANCH"
+            fi
+            exit 1
+          fi
       - run: npm run test:fuzz
       - name: Commit validated source
         env:
