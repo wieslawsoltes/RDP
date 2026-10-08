@@ -1,3 +1,4 @@
+import { parseServerMonitorLayout } from './MonitorLayout.js';
 import { MppcDecoder } from '../codecs/Mppc.js';
 import { Reader } from '../binary/Reader.js';
 import { Writer } from '../binary/Writer.js';
@@ -140,6 +141,7 @@ export class Session {
             this.shareId = demand.shareId;
             this.serverId = source;
             this.inputFlags = demand.inputFlags;
+            this.monitorLayout = null;
             this.desktop = { width: demand.width, height: demand.height };
             this.options.width = demand.width;
             this.options.height = demand.height;
@@ -208,9 +210,14 @@ export class Session {
                     throw new ProtocolError('SERVER_ERROR', `Server error-info 0x${code.toString(16).padStart(8, '0')}`);
                 break;
             }
-            case 55:
-                this.emit({ type: 'server-status', bytes: p.data.length });
+            case 55: {
+                const layout = parseServerMonitorLayout(p.data);
+                requireThat(this.desktop && layout.width === this.desktop.width && layout.height === this.desktop.height,
+                    'MONITOR_DESKTOP', 'Server monitor bounds differ from the negotiated desktop');
+                this.monitorLayout = layout;
+                this.emit({ type: 'monitor-layout', ...layout });
                 break;
+            }
             case 34: {
                 const r = new Reader(p.data), duration = r.u32le(), frequency = r.u32le(); r.end();
                 this.emit({ type: 'bell', duration, frequency }); break;
@@ -302,6 +309,7 @@ export class Session {
             this.input(events.slice(i, i + 128));
     }
     setClipboard(text) { requireThat(this.clipboard, 'CLIPBOARD_DISABLED', 'Clipboard was not enabled'); this.clipboard.setText(text); }
+    setMonitors(monitors) { requireThat(this.state === 'active' && this.display, 'DISPLAY_DISABLED', 'Active display control is required'); return this.display.layout(monitors); }
     resize(width, height, scale) { requireThat(this.display, 'DISPLAY_DISABLED', 'Server did not open display control'); this.display.resize(width, height, scale); }
     refresh() {
         if (this.state === 'active')

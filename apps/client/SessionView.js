@@ -1,3 +1,4 @@
+import { normalizeMonitorLayout } from '../../packages/protocol/MonitorLayout.js';
 import { createRenderer } from '../../packages/render/RendererFactory.js';
 import { InputController } from '../../packages/input/InputController.js';
 import { chord } from '../../packages/input/ScanCodes.js';
@@ -52,6 +53,7 @@ export class SessionView {
         toolbar.append(cad, element('span', 'separator'));
         for (const [symbol, label, action] of [
             ['refresh', 'Request full desktop refresh', () => this.post({ type: 'refresh' })],
+            ['desktop', 'Monitor layout', () => this.openDrawer('display')],
             ['clip', 'Text clipboard', () => this.openDrawer('clipboard')],
             ['keyboard', 'Keyboard and Unicode input', () => this.openDrawer('keyboard')],
             ['chart', 'Session diagnostics', () => this.openDrawer('diagnostics')],
@@ -179,6 +181,11 @@ export class SessionView {
             if (this.drawerKind === 'clipboard')
                 this.remoteArea.value = value.text;
             toast('Remote text clipboard received');
+            return;
+        }
+        if (value.type === 'monitor-layout') {
+            this.monitorLayout = value;
+            this.log.push({ at: new Date().toISOString(), type: 'monitor-layout', count: value.monitors.length, width: value.width, height: value.height });
             return;
         }
         if (value.type === 'display' && value.kind === 'ready') {
@@ -324,9 +331,34 @@ export class SessionView {
         this.drawer.replaceChildren();
         const header = element('div', 'drawer-header'), close = button('', { className: 'icon-button', symbol: 'close', title: 'Close panel' });
         close.onclick = () => { this.drawer.hidden = true; this.drawerKind = null; this.layout(); };
-        header.append(element('h3', '', { clipboard: 'Text clipboard', keyboard: 'Keyboard', diagnostics: 'Diagnostics' }[kind]), close);
+        header.append(element('h3', '', { display: 'Monitor layout', clipboard: 'Text clipboard', keyboard: 'Keyboard', diagnostics: 'Diagnostics' }[kind]), close);
         this.drawer.append(header);
-        if (kind === 'clipboard') {
+        if (kind === 'display') {
+            this.drawer.append(element('p', '', 'Coordinates are relative to the primary monitor at (0, 0). All monitors share one virtual-desktop canvas. Maximum 16 monitors within an 8192-pixel / 16-megapixel desktop.'));
+            const topology = element('textarea');
+            topology.setAttribute('aria-label', 'Monitor layout JSON');
+            topology.rows = 10;
+            topology.maxLength = 12000;
+            topology.value = JSON.stringify(this.monitorLayout?.monitors || [{ primary: true, left: 0, top: 0, width: this.width, height: this.height }], null, 2);
+            const actions = element('div', 'actions');
+            const dual = button('Two monitors');
+            dual.onclick = () => { topology.value = JSON.stringify([
+                { primary: true, left: 0, top: 0, width: 1280, height: 800 },
+                { primary: false, left: -1280, top: 0, width: 1280, height: 800 },
+            ], null, 2); };
+            const apply = button('Apply topology', { className: 'primary' });
+            apply.onclick = () => {
+                try {
+                    if (!this.displayReady) throw new Error('Server display control is not ready');
+                    const layout = normalizeMonitorLayout(JSON.parse(topology.value));
+                    this.post({ type: 'monitor-layout', monitors: layout.monitors });
+                    toast('Monitor layout requested; awaiting server reactivation');
+                } catch (error) { toast(error.message); }
+            };
+            actions.append(dual, apply);
+            this.drawer.append(topology, actions);
+        }
+        else if (kind === 'clipboard') {
             this.drawer.append(element('p', '', 'Text is exchanged with the remote cliprdr channel. Reading or writing your system clipboard always requires an explicit action.'));
             const local = element('textarea');
             local.placeholder = 'Text to copy to the remote clipboard…';

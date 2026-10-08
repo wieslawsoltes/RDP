@@ -1,4 +1,4 @@
-# Protocol and platform coverage — 0.1.0
+# Protocol and platform coverage — development branch
 
 **This is an implementation inventory, not a conformance certificate.** “Implemented” means source and some local tests exist. The client has not been qualified against Windows, a third-party RDP server, real GPU hardware, or an independent security laboratory.
 
@@ -11,16 +11,16 @@
 | Licensing | Valid-client licensing error alert accepted. | No license request/challenge/new license, CAL store, upgrade, renewal or reconnect licensing. This can block real servers. |
 | Activation | Demand/Confirm Active, synchronization, control cooperation/request/grant, font list/map and reactivation. | Not every optional capability combination or server ordering has independent evidence. |
 | Share Data | Selected display, input, control, refresh and status handling. | General unsupported PDU types are rejected; no blanket unknown-message success. |
-| Fast-path output | Bounded update reassembly with single/first/next/last fragmentation and implemented bitmap/palette/pointer update types. | No bulk-compressed/encrypted fast-path profile, full surface-command path or all optional update types. |
+| Fast-path output | Bounded update reassembly with single/first/next/last fragmentation and implemented bitmap/palette/pointer update types. | MPPC 8/64 KiB decompression is implemented; legacy encrypted fast-path, full surface commands and some optional update types remain unsupported. |
 | Raw bitmap | Decode 8/15/16/24/32 bits; padding, bottom-up rows, clipping/destination checks. | Connection negotiates 15/16/24-bit bitmap profile. Compressed 32-bit planar data unsupported. |
 | Interleaved RLE | Regular/lite/mega operations, foreground/background XOR, color runs/images, dither, masks, white/black. | CPU decoder; no GPU RLE decompressor. Finite hand-authored vectors and smoke fuzzing, not exhaustive codec qualification. |
 | Drawing orders / caches | Pointer cache and palette support; empty order updates accepted. | No general GDI orders, glyph cache/text orders, bitmap caches, brushes, surfaces or persistent bitmap cache. |
 | Advanced graphics | None advertised. | No RemoteFX, NSCodec, RDP6 planar, RDPGFX, AVC420/444, H.264/HEVC/AV1, progressive codecs or graphics frame acknowledgement protocols. |
 | Pointer | Cached classic mono/color AND/XOR and 32-bit alpha pointers, movement, hidden/default. | Maximum 96×96; paletted 4/8-bit pointer formats unsupported. |
-| Static virtual channels | Fragmentation, channel ownership and strict length limits for registered channels. | Channel compression disabled; no arbitrary plugin-channel forwarding. |
+| Static virtual channels | Fragmentation, channel ownership and strict length limits for registered channels. | MPPC receive compression and bounded suspend/resume queues are implemented; no arbitrary plugin-channel forwarding. |
 | Clipboard | Unicode text format list, capabilities, data request/response, line endings, generation handling, explicit system clipboard actions. | No HTML/RTF, bitmap clipboard, file streaming, clipboard locking, format palette or automatic OS clipboard monitoring. |
 | Dynamic virtual channels | Reliable v1/v2 subset, create/close/data fragmentation and channel allowlist. | No every-version DVC extension, lossy channels or transport priority implementation. |
-| Display control | Server caps, one primary monitor layout and resize requests, server-driven reactivation. | No spanning, multi-monitor topology, rotation, mixed-DPI monitor graph or auxiliary display windows. |
+| Display control | Initial GCC and dynamic 1–16-monitor layouts, negative coordinates, rotation/scaling attributes, bounds checks and server-driven reactivation. | One spanning canvas; no auxiliary display windows or physical multi-screen placement. Windows interoperability unverified; 8192-axis / 16-megapixel client budget. |
 | Keyboard | Scan codes, Unicode code units including surrogate pairs, selected extended keys, control chords, focus-loss release. | Browser/OS-reserved shortcuts remain platform constraints; complete keyboard-layout/IME equivalence unqualified. |
 | Pointer input | Mouse move/buttons/wheel/horizontal wheel/extra buttons, pointer capture, touch/pen-to-mouse mapping. | No native multitouch, pen pressure/tilt, relative/raw mouse, gesture protocol or RDP input extension. |
 | Audio output / input | Not implemented. | RDPSND, AUDIN and codec/device negotiation absent. |
