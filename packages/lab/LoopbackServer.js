@@ -10,7 +10,8 @@ import { clientCapabilities } from '../protocol/Capabilities.js';
 import { userDataBlock } from '../protocol/Gcc.js';
 import { StaticChannels } from '../channels/StaticChannels.js';
 import { clipboardPdu } from '../channels/ClipboardChannel.js';
-import { DISPLAY_CHANNEL } from '../channels/DisplayControl.js';
+import { DISPLAY_CHANNEL, parseDisplayLayout } from '../channels/DisplayControl.js';
+import { encodeServerMonitorLayout, parseServerMonitorLayout } from '../protocol/MonitorLayout.js';
 import { rgbaToBgr24 } from '../codecs/Pixels.js';
 /** Deterministic protocol test peer, NOT an RDP server implementation or a remote OS. */
 export class LoopbackServer {
@@ -95,6 +96,7 @@ export class LoopbackServer {
                 this.data(20, new Writer().u16le(action === 1 ? 2 : 4).u16le(action === 1 ? this.userId : 0).u32le(action === 1 ? this.serverId : 0).finish());
             }
             else if (p.type === 39) {
+                if (this.monitorLayout) this.data(55, encodeServerMonitorLayout(this.monitorLayout.monitors));
                 this.data(40, new Writer().u16le(0).u16le(0).u16le(3).u16le(4).finish());
                 this.state = 'active';
                 this.onActive(this.width, this.height);
@@ -134,6 +136,10 @@ export class LoopbackServer {
                 body.u32le();
                 this.width = body.u16le();
                 this.height = body.u16le();
+            }
+            if (type === 0xc005) {
+                requireThat(body.u32le() === 0, 'LAB_MONITOR', 'Reserved monitor flags');
+                this.monitorLayout = parseServerMonitorLayout(body.take(body.remaining));
             }
             if (type === 0xc003) {
                 const count = body.u32le();
@@ -209,18 +215,14 @@ export class LoopbackServer {
         else if (command === 1) {
             requireThat(r.u8() === 1 && r.u32le() === 0, 'LAB_DVC', 'Display channel was rejected');
             r.end();
-            this.static.transmit(this.dynamicId, new Writer().u8(0x30).u8(1).u32le(5).u32le(20).u32le(1).u32le(8192).u32le(8192).finish());
+            this.static.transmit(this.dynamicId, new Writer().u8(0x30).u8(1).u32le(5).u32le(20).u32le(16).u32le(8192).u32le(8192).finish());
         }
         else if (command === 3) {
-            requireThat(r.u8() === 1 && r.u32le() === 2 && r.u32le() === 56 && r.u32le() === 40 && r.u32le() === 1 && r.u32le() === 1, 'LAB_DISPLAY', 'Invalid single-monitor display layout');
-            r.i32le();
-            r.i32le();
-            const width = r.u32le(), height = r.u32le();
-            r.skip(20);
-            r.end();
-            requireThat(width >= 200 && width <= 8192 && width % 2 === 0 && height >= 200 && height <= 8192 && width * height <= 16777216, 'LAB_DISPLAY', 'Invalid layout dimensions');
-            this.width = width;
-            this.height = height;
+            requireThat(r.u8() === 1, 'LAB_DISPLAY', 'Unknown display channel');
+            const layout = parseDisplayLayout(r.take(r.remaining));
+            this.monitorLayout = layout;
+            this.width = layout.width;
+            this.height = layout.height;
             this.state = 'activating';
             this.indication(this.ioChannel, shareControl(6, this.serverId, new Writer().u32le(this.shareId).u16le(0).finish()));
             this.demandActive();

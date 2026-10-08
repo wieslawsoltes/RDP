@@ -1,7 +1,34 @@
 import { Reader } from '../binary/Reader.js';
 import { Writer } from '../binary/Writer.js';
 import { requireThat } from '../binary/ProtocolError.js';
+import { normalizeMonitorLayout } from '../protocol/MonitorLayout.js';
 export const DISPLAY_CHANNEL = 'Microsoft::Windows::RDS::DisplayControl';
+
+export function encodeDisplayLayout(layout) {
+    const w = new Writer().u32le(2).u32le(16 + 40 * layout.monitors.length).u32le(40).u32le(layout.monitors.length);
+    for (const m of layout.monitors)
+        w.u32le(m.primary ? 1 : 0).i32le(m.left).i32le(m.top).u32le(m.width).u32le(m.height)
+            .u32le(m.physicalWidth).u32le(m.physicalHeight).u32le(m.orientation)
+            .u32le(m.desktopScaleFactor).u32le(m.deviceScaleFactor);
+    return w.finish();
+}
+export function parseDisplayLayout(bytes, limits) {
+    const r = new Reader(bytes);
+    requireThat(r.u32le() === 2 && r.u32le() === bytes.length && r.u32le() === 40,
+        'DISPLAY_LAYOUT', 'Invalid display layout header');
+    const count = r.u32le();
+    requireThat(count >= 1 && count <= 16 && r.remaining === count * 40, 'DISPLAY_LAYOUT', 'Invalid display layout count');
+    const monitors = [];
+    for (let i = 0; i < count; i++) {
+        const flags = r.u32le();
+        requireThat((flags & ~1) === 0, 'MONITOR_FLAGS', 'Invalid display layout flags');
+        monitors.push({ primary: flags === 1, left: r.i32le(), top: r.i32le(), width: r.u32le(), height: r.u32le(),
+            physicalWidth: r.u32le(), physicalHeight: r.u32le(), orientation: r.u32le(),
+            desktopScaleFactor: r.u32le(), deviceScaleFactor: r.u32le() });
+    }
+    r.end();
+    return normalizeMonitorLayout(monitors, limits);
+}
 export class DisplayControl {
     constructor(send, emit = () => { }) { this.send = send; this.emit = emit; this.caps = null; }
     receive(bytes) {
@@ -9,19 +36,19 @@ export class DisplayControl {
         requireThat(length === bytes.length && type === 5 && length === 20, 'DISPLAY_CAPS', 'Invalid display-control capabilities');
         const maxMonitors = r.u32le(), factorA = r.u32le(), factorB = r.u32le();
         r.end();
-        requireThat(maxMonitors > 0 && maxMonitors <= 1024 && factorA > 0 && factorB > 0, 'DISPLAY_CAPS', 'Invalid monitor-area limits');
+        requireThat(maxMonitors > 0 && factorA > 0 && factorB > 0, 'DISPLAY_CAPS', 'Invalid monitor-area limits');
         this.caps = { maxMonitors, maxArea: BigInt(maxMonitors) * BigInt(factorA) * BigInt(factorB) };
-        this.emit({ type: 'ready', maxMonitors, maxArea: this.caps.maxArea.toString() });
+        this.emit({ type: 'ready', maxMonitors: Math.min(16, maxMonitors), maxArea: this.caps.maxArea.toString() });
+    }
+    layout(monitors) {
+        requireThat(this.caps, 'DISPLAY_STATE', 'Server has not enabled display control');
+        const layout = normalizeMonitorLayout(monitors, this.caps);
+        this.send(encodeDisplayLayout(layout));
+        this.emit({ type: 'requested', ...layout });
+        return layout;
     }
     resize(width, height, scale = 100) {
-        requireThat(this.caps, 'DISPLAY_STATE', 'Server has not enabled dynamic resolution');
-        requireThat(Number.isInteger(width) && width >= 200 && width <= 8192 && width % 2 === 0 && Number.isInteger(height) && height >= 200 && height <= 8192 && width * height <= 16777216, 'DISPLAY_SIZE', 'Unsupported desktop dimensions');
-        requireThat(BigInt(width * height) <= this.caps.maxArea && [100, 125, 150, 175, 200, 250, 300, 400, 500].includes(scale), 'DISPLAY_AREA', 'Monitor layout exceeds server capabilities');
-        const physicalWidth = Math.max(10, Math.min(10000, Math.round(width * 25.4 / 96))), physicalHeight = Math.max(10, Math.min(10000, Math.round(height * 25.4 / 96)));
-        const pdu = new Writer().u32le(2).u32le(56).u32le(40).u32le(1)
-            .u32le(1).i32le(0).i32le(0).u32le(width).u32le(height).u32le(physicalWidth).u32le(physicalHeight).u32le(0).u32le(scale).u32le(100).finish();
-        this.send(pdu);
-        this.emit({ type: 'requested', width, height });
+        return this.layout([{ primary: true, left: 0, top: 0, width, height, desktopScaleFactor: scale }]);
     }
     close() { this.caps = null; this.emit({ type: 'closed' }); }
 }

@@ -213,6 +213,8 @@ onmessage = received => {
             session?.text(message.text);
         else if (message.type === 'clipboard')
             session?.setClipboard(message.text);
+        else if (message.type === 'monitor-layout')
+            session?.setMonitors(message.monitors);
         else if (message.type === 'resize')
             session?.resize(message.width, message.height, message.scale || 100);
         else if (message.type === 'refresh')
@@ -221,7 +223,7 @@ onmessage = received => {
             stop();
     }
     catch (error) {
-        if (['input', 'text', 'clipboard', 'resize'].includes(message.type))
+        if (['input', 'text', 'clipboard', 'resize', 'monitor-layout'].includes(message.type))
             send({ type: 'notice', message: error.message });
         else
             fail(error);
