@@ -1,0 +1,63 @@
+name: Apply verified source patch
+on:
+  push:
+    branches: ['feat/**']
+    paths: ['.import/**']
+permissions:
+  contents: write
+concurrency:
+  group: import-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  apply:
+    if: github.repository == 'wieslawsoltes/RDP'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.ref_name }}
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - name: Verify and apply bounded textual patch
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, lzma, pathlib, subprocess
+          root = pathlib.Path.cwd()
+          manifest = json.loads((root / '.import/manifest.json').read_text())
+          data = (root / '.import/patch.xz').read_bytes()
+          assert len(data) <= 524288 and hashlib.sha256(data).hexdigest() == manifest['sha256']
+          decoder = lzma.LZMADecompressor(memlimit=134217728)
+          patch = decoder.decompress(data, max_length=2097153)
+          assert decoder.eof and not decoder.unused_data and len(patch) <= 2097152
+          patch.decode('utf-8')
+          stats = subprocess.run(['git','apply','--numstat','-z'],input=patch,check=True,capture_output=True).stdout
+          allowed = {'apps','packages','tests','tools','docs','README.md','package.json','.gitignore','targets.example.json','LICENSE'}
+          for entry in stats.split(b'\0'):
+              if not entry: continue
+              added, removed, name = entry.decode().split('\t',2)
+              path = pathlib.PurePosixPath(name)
+              assert added.isdecimal() and removed.isdecimal()
+              assert not path.is_absolute() and '..' not in path.parts and path.parts[0] in allowed
+          subprocess.run(['git','apply','--check','--whitespace=error-all'],input=patch,check=True)
+          subprocess.run(['git','apply','--whitespace=error-all'],input=patch,check=True)
+          message = manifest['message']
+          assert isinstance(message,str) and 1 <= len(message) <= 200 and '\n' not in message and '\r' not in message
+          (root / '.git/transfer-message').write_text(message + '\n')
+          PY
+      - run: npm run check
+      - run: npm test
+      - run: npm run test:fuzz
+      - name: Commit validated source
+        env:
+          BRANCH: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm -r .import
+          git add -A -- apps packages tests tools docs README.md package.json .gitignore targets.example.json LICENSE
+          git commit -F .git/transfer-message
+          git push origin "HEAD:$BRANCH"
