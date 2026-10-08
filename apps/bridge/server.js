@@ -7,11 +7,12 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketPeer } from '../../packages/transport/WebSocketPeer.js';
 import { requireThat } from '../../packages/binary/ProtocolError.js';
+import { normalizeOrigin, applyCors } from '../gateway/OriginPolicy.js';
 import { loadTargets } from './Targets.js';
 import { BridgeSession, tokenMatches } from './BridgeSession.js';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const mime = new Map([['.html', 'text/html; charset=utf-8'], ['.js', 'text/javascript; charset=utf-8'], ['.css', 'text/css; charset=utf-8'], ['.json', 'application/json'], ['.svg', 'image/svg+xml'], ['.png', 'image/png'], ['.ico', 'image/x-icon'], ['.wgsl', 'text/plain; charset=utf-8']]);
-export async function createBridge({ token = randomBytes(32).toString('hex'), targets = new Map(), host = '127.0.0.1', port = 8787, tlsOptions, publicOrigin } = {}) {
+export async function createBridge({ token = randomBytes(32).toString('hex'), targets = new Map(), host = '127.0.0.1', port = 8787, tlsOptions, publicOrigin, allowedOrigins = [] } = {}) {
     requireThat(typeof token === 'string' && token.length >= 24 && token.length <= 512, 'TOKEN_POLICY', 'Bridge token must have at least 24 characters');
     requireThat(tlsOptions || ['127.0.0.1', '::1', 'localhost'].includes(host), 'LISTEN_POLICY', 'Non-loopback listeners require HTTPS certificates');
     requireThat(!tlsOptions || publicOrigin, 'ORIGIN_POLICY', 'HTTPS requires LRDP_PUBLIC_ORIGIN with the exact externally used origin');
@@ -19,6 +20,8 @@ export async function createBridge({ token = randomBytes(32).toString('hex'), ta
         const u = new URL(publicOrigin);
         requireThat(u.origin === publicOrigin && (tlsOptions ? u.protocol === 'https:' : u.protocol === 'http:'), 'ORIGIN_POLICY', 'Public origin must be an exact scheme://host:port origin');
     }
+    requireThat(Array.isArray(allowedOrigins) && allowedOrigins.length <= 32, 'ORIGIN_POLICY', 'At most 32 explicitly allowed browser origins');
+    const origins = new Set(allowedOrigins.map(normalizeOrigin));
     let origin;
     const sessions = new Set(), sockets = new Set(), rates = new Map();
     const handler = async (req, res) => {
@@ -36,11 +39,12 @@ export async function createBridge({ token = randomBytes(32).toString('hex'), ta
             res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), usb=(), serial=()');
             res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; connect-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'");
             res.setHeader('Cache-Control', 'no-store');
+            const url = new URL(req.url, origin);
+            if (url.pathname.startsWith('/api/') && !applyCors(req, res, origins)) return;
             if (req.method !== 'GET' && req.method !== 'HEAD') {
                 res.writeHead(405, { Allow: 'GET, HEAD' }).end();
                 return;
             }
-            const url = new URL(req.url, origin);
             if (url.pathname === '/api/targets') {
                 if (!tokenMatches(req.headers.authorization?.replace(/^Bearer /, ''), token)) {
                     res.writeHead(401).end('Authentication required');
@@ -52,10 +56,14 @@ export async function createBridge({ token = randomBytes(32).toString('hex'), ta
             }
             if (url.pathname === '/api/health') {
                 res.setHeader('Content-Type', 'application/json');
-                res.end(JSON.stringify({ service: 'LRDP Web', version: '0.1.0', protocol: 'experimental bitmap profile' }));
+                res.end(JSON.stringify({ service: 'LRDP Web', version: '0.2.0', gatewayProtocol: 1, transports: ['websocket', 'tcp', 'tls', 'credssp'], protocol: 'experimental RDP client' }));
                 return;
             }
-            const pathname = url.pathname === '/' ? '/apps/client/index.html' : decodeURIComponent(url.pathname);
+            if (url.pathname === '/') {
+                res.writeHead(302, { Location: '/apps/client/index.html' }).end();
+                return;
+            }
+            const pathname = decodeURIComponent(url.pathname);
             if (!/^\/(apps\/client|packages)\//.test(pathname) || pathname.split('/').some(p => p === '..' || p.startsWith('.')) || pathname.includes('\\') || pathname.includes('\0')) {
                 res.writeHead(404).end('Not found');
                 return;
@@ -95,7 +103,7 @@ export async function createBridge({ token = randomBytes(32).toString('hex'), ta
     server.on('clientError', (_error, socket) => socket.destroy());
     server.on('upgrade', (req, socket, head) => {
         try {
-            requireThat(req.url === '/bridge' && req.headers.host === new URL(origin).host && req.headers.origin === origin, 'ORIGIN', 'WebSocket origin denied');
+            requireThat(req.url === '/bridge' && req.headers.host === new URL(origin).host && origins.has(req.headers.origin), 'ORIGIN', 'WebSocket origin denied');
             const ip = socket.remoteAddress || '', now = Date.now();
             if (rates.size > 1024)
                 for (const [key, rate] of rates)
@@ -121,6 +129,7 @@ export async function createBridge({ token = randomBytes(32).toString('hex'), ta
     await new Promise((resolve, reject) => { server.once('error', reject); server.listen(port, host, resolve); });
     const address = server.address(), hostText = host.includes(':') ? `[${host}]` : host;
     origin = publicOrigin || `${tlsOptions ? 'https' : 'http'}://${hostText}:${address.port}`;
+    origins.add(origin);
     return { server, token, origin, address, close: async () => {
             for (const session of sessions)
                 session.close();
@@ -132,7 +141,7 @@ export async function createBridge({ token = randomBytes(32).toString('hex'), ta
 async function main() {
     const targets = await loadTargets(process.env.LRDP_TARGETS || path.join(root, 'targets.json'));
     const tlsOptions = process.env.LRDP_HTTPS_CERT && process.env.LRDP_HTTPS_KEY ? { cert: await readFile(process.env.LRDP_HTTPS_CERT), key: await readFile(process.env.LRDP_HTTPS_KEY) } : undefined;
-    const bridge = await createBridge({ targets, host: process.env.LRDP_BIND || '127.0.0.1', port: Number(process.env.LRDP_PORT || 8787), token: process.env.LRDP_TOKEN || randomBytes(32).toString('hex'), tlsOptions, publicOrigin: process.env.LRDP_PUBLIC_ORIGIN });
+    const bridge = await createBridge({ targets, host: process.env.LRDP_BIND || '127.0.0.1', port: Number(process.env.LRDP_PORT || 8787), token: process.env.LRDP_TOKEN || randomBytes(32).toString('hex'), tlsOptions, publicOrigin: process.env.LRDP_PUBLIC_ORIGIN, allowedOrigins: (process.env.LRDP_ALLOWED_ORIGINS || '').split(',').filter(Boolean) });
     console.log(`\nLRDP Web — ${bridge.origin}\nConfigured targets: ${targets.size}\nBridge token (keep private): ${bridge.token}\n\nThe local protocol lab works without a remote server.\nReal connections require an allowlisted target and verified certificate.\n`);
     let stopping = false;
     for (const signal of ['SIGINT', 'SIGTERM'])

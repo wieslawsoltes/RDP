@@ -8,3 +8,7 @@ targets.json
 .env
 __pycache__/
 *.pyc
+.rdp-gateway/
+*.pfx
+*.p12
+dist/

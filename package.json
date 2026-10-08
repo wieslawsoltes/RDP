@@ -11,6 +11,9 @@
     "test:unit": "node --test tests/*.test.js",
     "test:fuzz": "node tools/fuzz.js",
     "bench": "node tools/benchmark.js",
-    "check": "node tools/check.js"
+    "check": "node tools/check.js",
+    "gateway": "node apps/gateway/cli.js",
+    "gateway:init": "node apps/gateway/cli.js init",
+    "build:pages": "node tools/build-pages.js"
   }
 }

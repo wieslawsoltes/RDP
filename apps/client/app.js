@@ -1,23 +1,39 @@
+import { gatewayEndpoint, defaultGateway, loadGatewayTargets } from './Gateway.js';
 import { Profiles, sanitizeProfile, importRdp, exportRdp } from '../../packages/profiles/Profiles.js';
 import { SessionView } from './SessionView.js';
 import { icon, button, element, toast, download } from './ui.js';
 const $ = selector => document.querySelector(selector), form = $('#connection-form'), profiles = new Profiles(), sessions = new Map();
-let targets = [], selected = null;
+let targets = [], selected = null, loadedGateway = null, targetRequest = null, generation = 0;
+const gatewayInput = $('#gateway-url');
+gatewayInput.value = defaultGateway(location.href, document.documentElement.dataset.hosting === 'static');
+function clearGateway() {
+    generation++;
+    targetRequest?.abort();
+    $('#load-targets').disabled = false;
+    targets = [];
+    loadedGateway = null;
+    $('#password').value = $('#bridge-token').value = '';
+    $('#target-id').replaceChildren();
+    $('#form-message').textContent = 'Gateway changed. Paste its token and load targets again.';
+}
+gatewayInput.addEventListener('input', clearGateway);
 const coverage = [
     ['TCP → X.224 → TLS bridge; certificate validation and allowlisted targets', 'Implemented'],
     ['CredSSP v5/v6 + NTLMv2; server binding verified before delegation', 'Implemented / unaudited'],
     ['MCS / GCC, activation and valid-client licensing response', 'Implemented subset'],
     ['Bitmap updates, 8/15/16/24/32-bit raw and 8/15/16/24-bit interleaved RLE', 'Implemented'],
+    ['MPPC 8/64 KiB receive compression and bounded 32-bit planar decoding', 'Implemented'],
+    ['Local TCP/TLS/NLA gateway and separately hosted static browser app', 'Implemented'],
     ['WebGPU compute conversion, ordered framebuffer writes and cursor composition', 'Implemented'],
     ['WebGL2 and Canvas 2D fallback compositors', 'Implemented'],
     ['Physical keyboard, Unicode, mouse, wheel; touch/pen mapped to mouse', 'Implemented'],
-    ['Unicode text clipboard over CLIPRDR; single-monitor display-control resize', 'Implemented'],
+    ['Unicode clipboard over CLIPRDR; initial/dynamic multi-monitor display control', 'Implemented'],
     ['Independent Windows / Windows Server interoperability qualification', 'Not completed'],
     ['Full RDS CAL issuance, persistence, renewal and redirection', 'Not implemented'],
-    ['GDI orders, bulk compression, RemoteFX, RDPEGFX, AVC420/444', 'Not implemented'],
+    ['GDI orders, RemoteFX, RDPEGFX, AVC420/444', 'Not implemented'],
     ['Kerberos, Remote Credential Guard, RD Gateway and UDP multitransport', 'Not implemented'],
     ['Audio, microphone, camera, native touch, USB, smart cards, drives and printers', 'Not implemented'],
-    ['Clipboard files/images, RemoteApp and multiple remote monitors', 'Not implemented'],
+    ['Clipboard files/images and RemoteApp', 'Not implemented'],
 ];
 for (const [name, status] of coverage) {
     const row = element('div', 'coverage-row');
@@ -141,16 +157,19 @@ $('#load-targets').onclick = async () => {
         $('#form-message').textContent = 'Paste the access token printed by the running bridge.';
         return;
     }
-    const control = $('#load-targets');
+    const control = $('#load-targets'), requestId = ++generation;
+    targetRequest?.abort();
+    const request = targetRequest = new AbortController();
+    const timer = setTimeout(() => request.abort(), 10000);
     control.disabled = true;
+    targets = [];
+    loadedGateway = null;
     try {
-        const response = await fetch('/api/targets', { headers: { Authorization: `Bearer ${token}` }, cache: 'no-store' });
-        if (!response.ok)
-            throw new Error(`Bridge rejected the target request (${response.status}). Verify its access token.`);
-        const data = await response.json();
-        targets = data.targets;
-        if (!Array.isArray(targets))
-            throw new Error('Invalid bridge target list');
+        const endpoint = gatewayEndpoint(gatewayInput.value);
+        const receivedTargets = await loadGatewayTargets(endpoint, token, { signal: request.signal });
+        if (requestId !== generation) return;
+        targets = receivedTargets;
+        loadedGateway = endpoint;
         const previous = $('#target-id').value;
         $('#target-id').replaceChildren();
         if (!targets.length) {
@@ -169,10 +188,12 @@ $('#load-targets').onclick = async () => {
         $('#form-message').textContent = targets.length ? `${targets.length} allowlisted target${targets.length === 1 ? '' : 's'} loaded.` : 'Add your RDP host to targets.json and restart the bridge. The local protocol lab is available without a server.';
     }
     catch (error) {
-        $('#form-message').textContent = error.message;
+        if (requestId === generation)
+            $('#form-message').textContent = `${error.message} Verify the gateway is running, its TLS certificate is trusted, this page's exact origin is allowed, and browser Local Network Access permission is granted. The gateway setup page includes a same-origin fallback.`;
     }
     finally {
-        control.disabled = false;
+        clearTimeout(timer);
+        if (requestId === generation) control.disabled = false;
     }
 };
 function updateSecurity() {
@@ -185,7 +206,7 @@ $('#target-id').onchange = updateSecurity;
 form.onsubmit = event => {
     event.preventDefault();
     const profile = currentProfile();
-    if (!targets.some(target => target.id === profile.targetId)) {
+    if (!loadedGateway || loadedGateway.origin !== gatewayEndpoint(gatewayInput.value).origin || !targets.some(target => target.id === profile.targetId)) {
         $('#form-message').textContent = 'Load and select an administrator-configured bridge target first.';
         return;
     }
@@ -197,12 +218,12 @@ form.onsubmit = event => {
         $('#form-message').textContent = 'TLS-only authentication is not permitted for this target.';
         return;
     }
-    openSession('remote', profile);
+    openSession('remote', { ...profile, gatewayUrl: loadedGateway.websocket });
 };
 function startLab() { openSession('lab', sanitizeProfile({ name: 'Protocol Lab', width: 1280, height: 800, bpp: 24, backend: $('#backend').value, clipboard: true, resize: true })); }
 $('#start-lab').onclick = startLab;
 $('#lab-nav').onclick = startLab;
-function newConnection() { showOverview(); form.reset(); $('#profile-id').value = ''; $('#form-message').textContent = ''; $('#connection-name').focus(); }
+function newConnection() { showOverview(); form.reset(); gatewayInput.value = defaultGateway(location.href, document.documentElement.dataset.hosting === 'static'); clearGateway(); $('#profile-id').value = ''; $('#form-message').textContent = ''; $('#connection-name').focus(); }
 for (const id of ['new-connection', 'tab-add'])
     $(`#${id}`).onclick = newConnection;
 $('#home-nav').onclick = showOverview;
