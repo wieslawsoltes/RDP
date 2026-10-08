@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#10151c"><meta name="description" content="LRDP Web — independent experimental RDP client with a WebGPU compositor.">
+  <title>LRDP · Remote workspace</title><link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%2378e4be'/%3E%3Cpath d='M8 8v16h16v-4H12V8z' fill='%2310151c'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/apps/client/styles.css"><script type="module" src="/apps/client/app.js"></script>
+</head>
+<body>
+<svg class="symbols" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"><defs>
+  <symbol id="i-monitor" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8m-4-4v4"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14m-6-6 6 6-6 6"/></symbol>
+  <symbol id="i-grid" viewBox="0 0 24 24"><rect x="4" y="4" width="6" height="6" rx="1"/><rect x="14" y="4" width="6" height="6" rx="1"/><rect x="4" y="14" width="6" height="6" rx="1"/><rect x="14" y="14" width="6" height="6" rx="1"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24"><path d="m12 3 8 3v6c0 4-5 8-8 9-3-1-8-5-8-9V6z"/><path d="m8 12 3 3 5-6"/></symbol>
+  <symbol id="i-chip" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/><rect x="9" y="9" width="6" height="6" rx="1"/><path d="M9 2v4m6-4v4M9 18v4m6-4v4M2 9h4m-4 6h4m12-6h4m-4 6h4"/></symbol>
+  <symbol id="i-clip" viewBox="0 0 24 24"><path d="M8 5H5v16h14V5h-3"/><rect x="8" y="3" width="8" height="5" rx="2"/><path d="M8 12h8m-8 4h6"/></symbol>
+  <symbol id="i-expand" viewBox="0 0 24 24"><path d="M9 3H3v6m12-6h6v6M3 15v6h6m12-6v6h-6"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 7a9 9 0 1 0 1 8M20 3v5h-5"/></symbol>
+  <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M6 18 18 6"/></symbol>
+  <symbol id="i-chart" viewBox="0 0 24 24"><path d="M3 3v18h18M6 15l4-5 4 3 6-7"/></symbol>
+  <symbol id="i-keyboard" viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M5 9h1m3 0h1m3 0h1m3 0h2M5 12h1m3 0h1m3 0h1m3 0h2M7 16h10"/></symbol>
+  <symbol id="i-theme" viewBox="0 0 24 24"><path d="M20 15a8.5 8.5 0 0 1-11-11 9 9 0 1 0 11 11Z"/></symbol>
+  <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 16V3m-5 5 5-5 5 5M4 16v5h16v-5"/></symbol>
+  <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v13m-5-5 5 5 5-5M4 17v4h16v-4"/></symbol>
+  <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></symbol>
+</defs></svg>
+<div class="app-shell">
+  <aside class="sidebar" id="sidebar">
+    <a class="brand" href="#workspace" aria-label="LRDP workspace"><span class="brand-mark">L</span><span>LRDP<span class="brand-sub">REMOTE WORKSPACE</span></span><span class="version">0.1</span></a>
+    <button class="primary new-connection" id="new-connection"><svg><use href="#i-plus"/></svg>New connection</button>
+    <nav aria-label="Workspace navigation"><button class="nav-item selected" id="home-nav"><svg><use href="#i-grid"/></svg>Workspace<span id="profile-count" class="count">0</span></button><button class="nav-item" id="lab-nav"><svg><use href="#i-chip"/></svg>Protocol lab<span class="dot"></span></button><button class="nav-item" id="coverage-nav"><svg><use href="#i-shield"/></svg>Implementation coverage</button></nav>
+    <div class="side-section"><span>SAVED CONNECTIONS</span><button class="icon-button" id="import-profile" title="Import .rdp metadata" aria-label="Import .rdp metadata"><svg><use href="#i-upload"/></svg></button></div>
+    <div class="profile-list" id="profile-list"><p class="muted empty-small">Your connections, kept on this device. Passwords are never saved.</p></div>
+    <div class="sidebar-footer"><div class="avatar">L</div><div><strong>Local workspace</strong><small>No account required</small></div><button class="icon-button" id="theme-toggle" title="Toggle theme" aria-label="Toggle theme"><svg><use href="#i-theme"/></svg></button></div>
+  </aside>
+  <main class="main" id="workspace">
+    <header class="topbar"><button id="sidebar-toggle" class="icon-button mobile-only" aria-label="Toggle navigation"><svg><use href="#i-menu"/></svg></button><div class="breadcrumb">Workspace <span>/</span> <strong id="page-title">Overview</strong></div><div class="top-meta"><span class="status-dot"></span>Independent implementation<span class="tag">EXPERIMENTAL</span></div></header>
+    <div class="tabbar" id="tabbar"><button class="workspace-tab active" id="overview-tab"><svg><use href="#i-grid"/></svg>Overview</button><div id="session-tabs" class="session-tabs"></div><button class="icon-button" id="tab-add" title="New connection" aria-label="New connection"><svg><use href="#i-plus"/></svg></button></div>
+    <section class="overview" id="overview">
+      <div class="hero"><div><div class="eyebrow">YOUR REMOTE WORKSPACE</div><h1>A closer connection.</h1><p>A browser-native desktop client, built from the protocol up.<br>Independent RDP. Explicit capabilities. A GPU-first renderer.</p></div><div class="hero-badge"><svg><use href="#i-monitor"/></svg><span>HTML / JS<br><strong>WEBGPU</strong></span></div></div>
+      <div class="notice"><svg><use href="#i-shield"/></svg><p><strong>Experimental bitmap profile — not full RDP conformance.</strong> NLA, rendering, clipboard and resize are implemented, but independent Windows interoperability and a security audit are not complete. <button class="text-button" id="coverage-inline">View coverage</button></p></div>
+      <div class="workspace-grid">
+        <section class="panel connect-panel"><div class="panel-header"><div><h2>Connect to a desktop</h2><p>Use an administrator-allowlisted bridge target.</p></div><svg class="section-icon"><use href="#i-monitor"/></svg></div>
+          <form id="connection-form" autocomplete="off">
+            <input type="hidden" id="profile-id" name="id">
+            <label>Connection name<input id="connection-name" name="name" maxlength="100" placeholder="My workstation" value="My workstation" required></label>
+            <div class="field-row token-row"><label>Bridge access token<input id="bridge-token" type="password" maxlength="512" placeholder="Paste the token printed by the bridge" autocomplete="off"></label><button id="load-targets" type="button" class="secondary compact">Load targets</button></div>
+            <label>Remote target<select name="targetId" id="target-id" required><option value="">Load configured targets first</option></select></label>
+            <div class="field-row"><label>Username<input name="username" id="username" maxlength="256" placeholder="username" autocomplete="off"></label><label>Domain<input name="domain" id="domain" maxlength="256" placeholder="Optional" autocomplete="off"></label></div>
+            <label>Password<input name="password" id="password" type="password" maxlength="1024" placeholder="Used for this session only" autocomplete="off"></label>
+            <div class="field-row"><label>Authentication<select name="security" id="security"><option value="nla">NLA · NTLMv2 / CredSSP</option><option value="tls" disabled>TLS-only · target must permit</option></select></label><label>Renderer<select name="backend" id="backend"><option value="auto">Auto · WebGPU → WebGL2 → Canvas</option><option value="webgpu">WebGPU compute</option><option value="webgl2">WebGL2</option><option value="canvas">Canvas 2D</option></select></label></div>
+            <details><summary>Display &amp; integration <span>1280 × 800 · 24-bit</span></summary><div class="advanced-grid"><label>Width<input name="width" id="width" type="number" value="1280" min="200" max="8192" step="2"></label><label>Height<input name="height" id="height" type="number" value="800" min="200" max="8192"></label><label>Color depth<select name="bpp" id="bpp"><option value="24">24-bit</option><option value="16">16-bit</option><option value="15">15-bit</option></select></label></div><div class="switch-row"><label class="check"><input type="checkbox" name="clipboard" id="clipboard" checked>Text clipboard</label><label class="check"><input type="checkbox" name="resize" id="resize" checked>Dynamic resize</label></div><p class="fineprint">Device access depends on browser permissions. Native USB, audio, printers and drives are not redirected in this build.</p></details>
+            <div id="form-message" class="form-message" role="status" aria-live="polite"></div>
+            <div class="form-actions"><button class="secondary" type="button" id="save-profile">Save profile</button><button class="primary" type="submit" id="connect-button">Connect<svg><use href="#i-arrow"/></svg></button></div>
+            <p class="fineprint form-note"><svg><use href="#i-shield"/></svg>Credentials stay in memory. The trusted bridge terminates TLS and performs NLA.</p>
+          </form>
+        </section>
+        <div class="right-stack"><section class="panel lab-card"><div class="eyebrow">NO SERVER NEEDED</div><div class="lab-illustration" aria-hidden="true"><div class="mini-window"><div class="mini-chrome"><i></i><i></i><i></i><span>PROTOCOL LAB</span></div><div class="mini-body"><span class="mini-line"></span><span class="mini-line short"></span><div class="mini-bars"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="mini-status">RDP PACKETS <span>→</span> PIXELS</div></div><span class="gpu-badge"><svg><use href="#i-chip"/></svg>LOCAL LOOPBACK</span></div><h2>Explore the protocol lab.</h2><p>Test the real decoding path with a synthetic desktop. Try keyboard input, Unicode clipboard and a live resolution change.</p><button id="start-lab" class="secondary wide">Launch local lab<svg><use href="#i-arrow"/></svg></button><small>Runs on this device. Not a remote operating system.</small></section>
+          <section class="panel capability-card"><div class="panel-header"><h2>This browser</h2><svg class="section-icon"><use href="#i-chip"/></svg></div><div class="capability-row"><span>WebGPU API</span><span id="cap-gpu" class="pill">Checking</span></div><div class="capability-row"><span>Secure context</span><span id="cap-secure" class="pill">Checking</span></div><div class="capability-row"><span>Clipboard API</span><span id="cap-clip" class="pill">Checking</span></div><div class="capability-row"><span>Protocol worker</span><span id="cap-worker" class="pill">Checking</span></div><p class="fineprint">API presence does not establish GPU availability or permissions. The selected renderer is verified when a session opens.</p></section>
+        </div>
+      </div>
+      <footer class="overview-footer"><span>Clean-room source · MIT license · No RDP engine dependencies</span><span>0.1.0 / BITMAP PROFILE</span></footer>
+    </section>
+    <div class="sessions" id="sessions" hidden></div>
+    <footer class="statusbar"><div><span class="status-dot"></span><span id="global-status">Ready</span></div><span id="status-detail">TCP/TLS bridge required for remote connections</span></footer>
+  </main>
+</div>
+<dialog id="coverage-dialog" class="modal"><div class="panel-header"><div><div class="eyebrow">IMPLEMENTATION CONTRACT</div><h2>Capability coverage</h2></div><button class="icon-button" data-close-dialog aria-label="Close coverage"><svg><use href="#i-close"/></svg></button></div><p>This is an independent experimental client, not a certified implementation of the complete RDP family. Unsupported capabilities are not advertised.</p><div id="coverage-table"></div><div class="notice compact-notice"><p>Passing a co-developed loopback fixture is not proof of Windows interoperability. Do not use this release with sensitive production credentials.</p></div><button class="secondary" data-close-dialog>Close</button></dialog>
+<input type="file" id="rdp-file" accept=".rdp" hidden><div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+</body></html>

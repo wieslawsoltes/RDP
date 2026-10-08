@@ -1,0 +1,16 @@
+{
+  "name": "lrdp-web-workspace",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Independent RDP browser client, WebGPU bitmap compositor and constrained TCP/TLS bridge",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "start": "node apps/bridge/server.js",
+    "test": "node --test tests/*.test.js tests/integration/*.test.js",
+    "test:unit": "node --test tests/*.test.js",
+    "test:fuzz": "node tools/fuzz.js",
+    "bench": "node tools/benchmark.js",
+    "check": "node tools/check.js"
+  }
+}
