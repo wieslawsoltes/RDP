@@ -128,8 +128,8 @@ export class SessionView {
                 }
             };
             this.worker.onerror = event => this.error({ code: 'WORKER_FAILED', message: event.message || 'Protocol worker failed' });
-            const url = new URL('/bridge', location.href);
-            url.protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const url = this.options.gatewayUrl ? new URL(this.options.gatewayUrl) : new URL('/bridge', location.href);
+            if (!this.options.gatewayUrl) url.protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
             this.worker.postMessage({ type: 'start', mode: this.mode, options: this.options, password, token, url: url.href });
             password = token = '';
             this.metricsTimer = setInterval(() => this.updateMetrics(), 1000);

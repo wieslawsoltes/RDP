@@ -4,7 +4,7 @@
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#10151c"><meta name="description" content="LRDP Web — independent experimental RDP client with a WebGPU compositor.">
   <title>LRDP · Remote workspace</title><link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%2378e4be'/%3E%3Cpath d='M8 8v16h16v-4H12V8z' fill='%2310151c'/%3E%3C/svg%3E">
-  <link rel="stylesheet" href="/apps/client/styles.css"><script type="module" src="/apps/client/app.js"></script>
+  <link rel="stylesheet" href="./styles.css"><script type="module" src="./app.js"></script>
 </head>
 <body>
 <svg class="symbols" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"><defs>
@@ -45,6 +45,8 @@
           <form id="connection-form" autocomplete="off">
             <input type="hidden" id="profile-id" name="id">
             <label>Connection name<input id="connection-name" name="name" maxlength="100" placeholder="My workstation" value="My workstation" required></label>
+            <label>Local gateway address<input id="gateway-url" type="url" autocomplete="off" spellcheck="false" placeholder="http://127.0.0.1:8787"></label>
+            <p class="fineprint">Run <code>npm run gateway -- --allow-origin https://wieslawsoltes.github.io</code> locally. Use WSS with a trusted certificate when loopback WS is blocked. <a href="./gateway.html" target="_blank" rel="noopener noreferrer">Gateway setup</a></p>
             <div class="field-row token-row"><label>Bridge access token<input id="bridge-token" type="password" maxlength="512" placeholder="Paste the token printed by the bridge" autocomplete="off"></label><button id="load-targets" type="button" class="secondary compact">Load targets</button></div>
             <label>Remote target<select name="targetId" id="target-id" required><option value="">Load configured targets first</option></select></label>
             <div class="field-row"><label>Username<input name="username" id="username" maxlength="256" placeholder="username" autocomplete="off"></label><label>Domain<input name="domain" id="domain" maxlength="256" placeholder="Optional" autocomplete="off"></label></div>
