@@ -1,6 +1,7 @@
 import { Reader } from '../binary/Reader.js';
-import { requireThat, ProtocolError } from '../binary/ProtocolError.js';
+import { requireThat } from '../binary/ProtocolError.js';
 import { decodeInterleaved } from '../codecs/InterleavedRle.js';
+import { decodePlanar } from '../codecs/Planar.js';
 export function parseBitmapUpdate(reader, desktop) {
     const count = reader.u16le();
     requireThat(count <= 4096, 'BITMAP_COUNT', 'Too many bitmap rectangles');
@@ -21,9 +22,8 @@ export function parseBitmapUpdate(reader, desktop) {
                 const firstRow = source.u16le(), mainBody = source.u16le(), scanWidth = source.u16le(), uncompressed = source.u16le();
                 requireThat(firstRow === 0 && mainBody === source.remaining && scanWidth > 0 && uncompressed > 0, 'BITMAP_COMPRESSION_HEADER', 'Invalid bitmap compression header');
             }
-            if (bpp === 32)
-                throw new ProtocolError('CODEC_NOT_NEGOTIATED', '32-bit planar bitmap compression was not negotiated');
-            data = decodeInterleaved(source.take(source.remaining), width, height, bpp);
+            const encoded = source.take(source.remaining);
+            data = bpp === 32 ? decodePlanar(encoded, width, height) : decodeInterleaved(encoded, width, height, bpp);
             stride = width * bytesPerPixel;
         }
         else {

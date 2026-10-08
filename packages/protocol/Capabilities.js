@@ -6,7 +6,7 @@ export function clientCapabilities({ width, height, bpp = 24, keyboardLayout = 0
     const general = new Writer().u16le(4).u16le(0).u16le(0x200).u16le(0).u16le(0)
         .u16le(0x405).u16le(0).u16le(0).u16le(0).u8(1).u8(1).finish();
     const bitmap = new Writer().u16le(bpp).u16le(1).u16le(1).u16le(1).u16le(width).u16le(height)
-        .u16le(0).u16le(1).u16le(1).u8(0).u8(0).u16le(1).u16le(0).finish();
+        .u16le(0).u16le(1).u16le(1).u8(0).u8(bpp === 32 ? 8 : 0).u16le(1).u16le(0).finish();
     const order = new Writer().zeros(16).u32le(0).u16le(1).u16le(20).u16le(0).u16le(1).u16le(0).u16le(2)
         .zeros(32).u16le(0).u16le(0).u32le(0).u32le(0).u16le(0).u16le(0).u16le(0).u16le(0).finish();
     const input = new Writer().u16le(0x15).u16le(0).u32le(keyboardLayout).u32le(4).u32le(0).u32le(12).zeros(64).finish();
