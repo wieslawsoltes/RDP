@@ -15,7 +15,7 @@ export function sanitizeProfile(input) {
         value.width = 1280;
         value.height = 800;
     }
-    value.bpp = [15, 16, 24].includes(Number(value.bpp)) ? Number(value.bpp) : 24;
+    value.bpp = [15, 16, 24, 32].includes(Number(value.bpp)) ? Number(value.bpp) : 24;
     value.backend = ['auto', 'webgpu', 'webgl2', 'canvas'].includes(value.backend) ? value.backend : 'auto';
     value.clipboard = value.clipboard !== false;
     value.resize = value.resize !== false;

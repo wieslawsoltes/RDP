@@ -6,12 +6,12 @@ export const GccType = Object.freeze({ CORE: 0xc001, SECURITY: 0xc002, NETWORK: 
 export function userDataBlock(type, body) { return new Writer(body.length + 4).u16le(type).u16le(body.length + 4).put(body).finish(); }
 export function clientCore({ width = 1280, height = 800, bpp = 24, keyboardLayout = 0x409, selectedProtocol = 2 } = {}) {
     requireThat(Number.isInteger(width) && Number.isInteger(height) && width >= 200 && height >= 200 && width <= 8192 && height <= 8192 && width * height <= 16777216, 'DESKTOP_LIMIT', 'Desktop must fit 200–8192 pixels per axis and 16 megapixels');
-    requireThat([15, 16, 24].includes(bpp), 'BPP', 'This connection profile negotiates 15, 16 or 24 bpp');
+    requireThat([15, 16, 24, 32].includes(bpp), 'BPP', 'This connection profile negotiates 15, 16, 24 or 32 bpp');
     const w = new Writer(216).u32le(0x80004).u16le(width).u16le(height).u16le(0xca01).u16le(0xaa03)
         .u32le(keyboardLayout).u32le(1).fixedUtf16('LRDP-WEB', 32)
         .u32le(4).u32le(0).u32le(12).zeros(64)
-        .u16le(0xca01).u16le(1).u32le(0).u16le(bpp).u16le(7)
-        .u16le(0x61).zeros(64).u8(6).u8(0).u32le(selectedProtocol);
+        .u16le(0xca01).u16le(1).u32le(0).u16le(Math.min(24, bpp)).u16le(15)
+        .u16le(0x61 | (bpp === 32 ? 2 : 0)).zeros(64).u8(6).u8(0).u32le(selectedProtocol);
     return userDataBlock(GccType.CORE, w.finish());
 }
 export function conferenceRequest(options, channels) {

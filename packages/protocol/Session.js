@@ -145,7 +145,8 @@ export class Session {
             this.desktop = { width: demand.width, height: demand.height };
             this.options.width = demand.width;
             this.options.height = demand.height;
-            // Advertise exactly the implemented bitmap profile, even if the server initially offers 32bpp.
+            // A server that cannot offer 32 bpp selects the negotiated fallback.
+            if (this.options.bpp === 32 && demand.bpp !== 32) this.options.bpp = demand.bpp;
             this.emit({ type: 'desktop', ...this.desktop, bpp: this.options.bpp });
             this.transition('activating');
             this.channelSend(this.ioChannel, shareControl(3, this.userId, confirmActiveBody(this.shareId, this.userId, this.options)));
@@ -275,6 +276,8 @@ export class Session {
             this.pointer.cached(bytes);
         else if (code === 11)
             this.pointer.shape(bytes, true);
+        else if (code === 12)
+            this.pointer.large(bytes);
         else
             throw new ProtocolError('FASTPATH_UPDATE', `Unnegotiated fast-path update ${code}`);
     }

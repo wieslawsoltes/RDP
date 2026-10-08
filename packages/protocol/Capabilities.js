@@ -19,7 +19,8 @@ export function clientCapabilities({ width, height, bpp = 24, keyboardLayout = 0
         capability(13, input), capability(14, new Writer().u16le(1).u16le(0).finish()),
         capability(12, new Writer().u16le(1).u16le(0).finish()),
         capability(20, new Writer().u32le(compression ? 1 : 0).u32le(1600).finish()),
-        capability(26, new Writer().u32le(16 * 1024 * 1024).finish())];
+        capability(26, new Writer().u32le(16 * 1024 * 1024).finish()),
+        capability(27, new Writer().u16le(3).finish())];
 }
 export function parseDemandActive(body) {
     const r = new Reader(body), shareId = r.u32le(), sourceLength = r.u16le(), capsLength = r.u16le();
