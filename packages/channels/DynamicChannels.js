@@ -33,9 +33,10 @@ export class DynamicChannels {
             requireThat(nameBytes.length > 1 && nameBytes.at(-1) === 0 && !nameBytes.subarray(0, -1).includes(0), 'DVC_NAME', 'Invalid dynamic-channel name');
             requireThat(nameBytes.every(v => v < 128), 'DVC_NAME', 'Non-ASCII dynamic-channel name');
             const name = new TextDecoder().decode(nameBytes.subarray(0, -1)), factory = this.factories.get(name);
-            const response = writeInt(new Writer().u8(0x10 | cb), id, cb).u32le(factory ? 0 : 0xc0000001).finish();
-            if (factory) {
-                const channel = { handler: factory(data => this.transmit(id, data)), queue: new ByteQueue(8 * 1024 * 1024), expected: null };
+            const handler = factory?.(data => this.transmit(id, data));
+            const response = writeInt(new Writer().u8(0x10 | cb), id, cb).u32le(handler ? 0 : 0xc0000001).finish();
+            if (handler) {
+                const channel = { handler, queue: new ByteQueue(8 * 1024 * 1024), expected: null };
                 this.channels.set(id, channel);
                 this.send(response);
                 this.emit({ type: 'opened', id, name });
@@ -50,6 +51,7 @@ export class DynamicChannels {
         requireThat(channel, 'DVC_UNKNOWN', 'Unknown dynamic channel');
         if (command === 4) {
             r.end();
+            channel.queue.clear();
             channel.handler.close?.();
             this.channels.delete(id);
             this.send(writeInt(new Writer().u8(0x40 | cb), id, cb).finish());

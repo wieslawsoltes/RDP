@@ -115,7 +115,9 @@ function flush() {
         scheduleFlush();
 }
 function openSession(options, negotiation) {
-    session = new Session({ options: { ...options, ...negotiation }, emit: event, send: bytes => {
+    session = new Session({ canSendAudioInput: bytes => !!outbound && !outbound.closed &&
+            outbound.bytes + outbound.outstanding + (socket?.bufferedAmount || 0) + bytes <= 65536,
+        options: { ...options, ...negotiation }, emit: event, send: bytes => {
             if (peer)
                 queueMicrotask(() => {
                     if (!stopped) {
@@ -230,7 +232,11 @@ function start(message) {
 }
 onmessage = received => {
     const message = received.data;
-    if (stopped) return;
+    if (stopped) {
+        for (const plane of message.type === 'microphone-data' && Array.isArray(message.planes) ? message.planes : [])
+            if (plane instanceof Float32Array) plane.fill(0);
+        return;
+    }
     try {
         if (message.type === 'start') {
             if (session || socket || stopped)
@@ -250,6 +256,19 @@ onmessage = received => {
             session?.input(message.events);
         else if (message.type === 'text')
             session?.text(message.text);
+        else if (message.type === 'microphone-ready')
+            session?.microphoneReady(message.requestId, message.captureId, message.result);
+        else if (message.type === 'microphone-stop')
+            session?.microphoneStop(message.requestId, message.captureId);
+        else if (message.type === 'microphone-data') {
+            try {
+                const age = performance.timeOrigin + performance.now() - message.queuedAt;
+                if (Number.isFinite(age) && age >= 0 && age <= 250) session?.microphoneData(message);
+            } finally {
+                for (const plane of Array.isArray(message.planes) ? message.planes : []) if (plane instanceof Float32Array) plane.fill(0);
+                send({ type: 'microphone-consumed', id: message.id, requestId: message.requestId, captureId: message.captureId });
+            }
+        }
         else if (message.type === 'audio-consumed')
             session?.consumeAudio(message.id, message.disposition);
         else if (message.type === 'clipboard')
@@ -271,7 +290,7 @@ onmessage = received => {
             stop();
     }
     catch (error) {
-        if (['input', 'text', 'clipboard', 'clipboard-content', 'clipboard-request', 'resize', 'monitor-layout'].includes(message.type))
+        if (['input', 'text', 'clipboard', 'clipboard-content', 'clipboard-request', 'resize', 'monitor-layout', 'microphone-data', 'microphone-ready', 'microphone-stop'].includes(message.type))
             send({ type: 'notice', message: error.message });
         else
             fail(error);

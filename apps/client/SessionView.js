@@ -1,3 +1,4 @@
+import { BrowserMicrophone } from './BrowserMicrophone.js';
 import { BrowserAudio } from './BrowserAudio.js';
 import { readBrowserClipboard, writeBrowserClipboard, releaseClipboardContent, ClipboardSnapshot } from './BrowserClipboard.js';
 import { normalizeMonitorLayout } from '../../packages/protocol/MonitorLayout.js';
@@ -8,7 +9,8 @@ import { icon, button, download, toast, formatBytes, element } from './ui.js';
 export class SessionView {
     constructor({ options, mode, password, token, onClose, onSelect, onReconnect }) {
         this.id = crypto.randomUUID();
-        this.options = { ...options, audio: options.audio === true && typeof globalThis.AudioContext === 'function' };
+        this.options = { ...options, audio: options.audio === true && typeof globalThis.AudioContext === 'function',
+            microphone: mode === 'remote' && options.microphone === true && typeof globalThis.AudioWorkletNode === 'function' && !!navigator.mediaDevices?.getUserMedia };
         this.mode = mode;
         this.onClose = onClose;
         this.onReconnect = onReconnect;
@@ -68,6 +70,25 @@ export class SessionView {
             volume.oninput = () => this.audio.setVolume(Number(volume.value) / 100);
             this.audioStatus = element('span', 'muted', 'Sound: awaiting formats');
             toolbar.append(enable, mute, volume, this.audioStatus);
+        }
+        if (this.options.microphone) {
+            this.micStart = button('Start mic', { className: 'small-button', title: 'Start microphone capture for this remote session' });
+            this.micStop = button('Stop mic', { className: 'small-button', title: 'Stop microphone capture and release the device' });
+            this.micStatus = element('span', 'muted', 'Mic: awaiting server request');
+            this.micStatus.setAttribute('role', 'status'); this.micStatus.setAttribute('aria-label', 'Microphone status');
+            this.micStart.disabled = this.micStop.disabled = true;
+            this.microphone = new BrowserMicrophone({ send: (value, transfer) => this.post(value, transfer), status: value => {
+                this.micStatus.textContent = `Mic: ${value}`;
+                this.micStart.disabled = this.closed || ['failed', 'closed'].includes(this.state) || !this.microphone?.request || !!this.microphone?.run;
+                this.micStop.disabled = !this.microphone?.run;
+            } });
+            this.micStart.onclick = () => this.microphone.enable();
+            this.micStop.onclick = () => this.microphone.stop();
+            this.micVisibility = () => { if (document.hidden) this.microphone.stop('tab hidden'); };
+            this.micPageHide = () => this.microphone.stop('page hidden');
+            document.addEventListener('visibilitychange', this.micVisibility);
+            window.addEventListener('pagehide', this.micPageHide);
+            toolbar.append(this.micStart, this.micStop, this.micStatus);
         }
         for (const [symbol, label, action] of [
             ['refresh', 'Request full desktop refresh', () => this.post({ type: 'refresh' })],
@@ -182,8 +203,8 @@ export class SessionView {
         });
     }
     post(value, transfer = []) {
-        if (!this.closed && this.worker)
-            this.worker.postMessage(value, transfer);
+        if (!this.closed && this.worker) { this.worker.postMessage(value, transfer); return true; }
+        return false;
     }
     event(value) {
         if (this.closed)
@@ -210,6 +231,8 @@ export class SessionView {
             this.bridgeRttMs = value.bridgeRttMs;
             return;
         }
+        if (value.type === 'microphone') { this.microphone?.receive(value); return; }
+        if (value.type === 'microphone-consumed') { this.microphone?.consumed(value); return; }
         if (value.type === 'audio') {
             if (value.kind === 'samples') {
                 if (this.audio && !this.closed && !['failed', 'closed'].includes(this.state)) this.audio.receive(value);
@@ -254,7 +277,7 @@ export class SessionView {
         if (value.type === 'state' || value.type === 'stage') {
             this.state = value.state;
             if (value.state === 'closed') {
-                this.clipboardSnapshot.clear(); this.audio?.close(); this.input?.destroy();
+                this.clipboardSnapshot.clear(); this.audio?.close(); this.microphone?.close(); this.input?.destroy();
                 this.displayReady = false; this.resolution.disabled = true;
                 this.healthLabel.textContent = 'Gateway: disconnected';
             }
@@ -563,7 +586,7 @@ export class SessionView {
         this.displayReady = false; this.resolution.disabled = true;
         this.reconnectButton.hidden = this.mode !== 'remote' || !this.onReconnect;
         this.healthLabel.textContent = this.mode === 'remote' ? 'Gateway: disconnected' : '';
-        this.audio?.close();
+        this.audio?.close(); this.microphone?.close();
         this.clipboardSnapshot.clear();
         this.remoteClipboard = '';
         this.updateClipboardControls();
@@ -595,8 +618,7 @@ export class SessionView {
     select(active) {
         this.root.hidden = !active;
         this.tab.classList.toggle('active', active);
-        if (!active)
-            this.input?.release();
+        if (!active) { this.input?.release(); this.microphone?.stop('session hidden'); }
         else
             requestAnimationFrame(() => this.layout());
     }
@@ -604,11 +626,13 @@ export class SessionView {
         if (this.closed)
             return;
         this.input?.destroy();
-        this.audio?.close();
+        this.audio?.close(); this.microphone?.close();
         this.post({ type: 'close' });
         this.closed = true;
         this.clipboardSnapshot.clear();
         setTimeout(() => this.worker?.terminate(), 100);
+        document.removeEventListener('visibilitychange', this.micVisibility);
+        window.removeEventListener('pagehide', this.micPageHide);
         this.observer.disconnect();
         clearInterval(this.metricsTimer);
         if (this.renderRaf)

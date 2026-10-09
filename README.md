@@ -36,8 +36,22 @@ connection options, then click **Enable sound** in the session toolbar. The
 client negotiates supported uncompressed mono/stereo formats; Web Audio starts
 only after the user action. **Mute sound** stops and clears queued samples, and
 closing the session releases the audio context. Volume changes are local.
-Microphone, compressed audio and UDP audio are not implemented. See
+Compressed audio and UDP audio are not implemented. See
 [audio protocol coverage and tests](docs/changes/0008-audio-output.md).
+
+
+### Microphone input
+
+Enable **Offer microphone channel** in the connection options, then use **Start
+mic** when the remote application requests recording. Capture requires a secure
+browser context, AudioWorklet support and explicit browser permission. Channel
+negotiation alone never activates the device. **Stop mic**, switching session,
+hiding the page, server channel close and connection failure stop the tracks.
+Restart requires another user action; a saved profile records only the channel
+offer, not capture permission. PCM16 mono/stereo, 8–96 kHz wire formats and bounded
+FIR resampling are implemented on the reliable AUDIO_INPUT channel. Already sent
+network bytes cannot be recalled. See [microphone scope and tests](docs/changes/0012-microphone.md).
+
 
 ## Run the application
 
@@ -110,7 +124,7 @@ The browser-to-bridge HTTPS certificate and bridge-to-RDP certificate are separa
 | Display control | Reliable dynamic channels and one-primary-monitor resize through the display-control channel and server reactivation. No multi-monitor layout. |
 | Diagnostics | Measured packet/byte/bitmap counters, renderer submission cost, presented-frame rate, optional GPU timestamps when available, bridge-only RTT, downloadable reports. |
 
-Microphones, webcams, drive/USB/printer/smart-card redirection, RemoteApp, Microsoft RD Gateway, UDP/multitransport, advanced graphics codecs, general drawing orders, and licensing beyond the documented profile are **not implemented**. Opt-in PCM sound output and gateway-managed CAL exchange are implemented. The complete distinctions are in [PROTOCOL_MATRIX.md](docs/PROTOCOL_MATRIX.md).
+Webcams, drive/USB/printer/smart-card redirection, RemoteApp, Microsoft RD Gateway, UDP/multitransport, advanced graphics codecs, general drawing orders, and licensing beyond the documented profile are **not implemented**. Opt-in PCM sound output/input and gateway-managed CAL exchange are implemented. The complete distinctions are in [PROTOCOL_MATRIX.md](docs/PROTOCOL_MATRIX.md).
 
 ## Architecture
 
