@@ -15,6 +15,10 @@ test('Pages build is subpath-safe and includes all browser imports but no gatewa
     assert.ok(!files.has('.nojekyll'), 'deployment marker is not a public asset');
     assert.ok(!Object.hasOwn(manifest.sha256, '.nojekyll'));
     assert.ok(files.has('apps/client/Gateway.js'));
+    assert.ok(files.has('apps/client/BrowserMicrophone.js'));
+    assert.ok(files.has('apps/client/microphone-worklet.js'));
+    assert.ok(files.has('packages/channels/AudioInputChannel.js'));
+    assert.ok(files.has('packages/codecs/PcmCapture.js'));
     assert.ok(files.has('packages/render/shaders.js'));
     assert.deepEqual(Object.keys(manifest.sha256).sort(), [...files].sort());
     for (const name of files) {

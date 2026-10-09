@@ -51,3 +51,17 @@ implemented; Windows deployments need an appropriately private account ACL.
 There is no hardware/keychain-bound key protection. No local license is minted
 and no server rejection is converted to an entitlement. See the resource,
 interop and backup boundaries in [licensing integration](changes/0011-licensing-integration.md).
+
+
+## Microphone consent and retention
+
+A server Open request is not device consent. Only the user's Start mic action
+calls getUserMedia. Each capture attempt has separate request/capture IDs; old
+readiness and sample callbacks cannot authorize a new channel. Cancellation of
+an unanswered permission prompt settles the owner immediately, and a stream
+returned after cancellation is stopped without connecting it to the graph.
+No camera is requested. Captured float samples are transferred, bounded, consumed
+or dropped, and cleared; resampler partial data is cleared on pause, transport
+failure and format changes. Track revocation, hidden-session/page, channel close
+and disconnect stop the device. In-flight protocol bytes already handed to the
+network cannot be recalled. The test WAV is synthetic, not physical ambient audio.

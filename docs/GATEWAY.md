@@ -101,3 +101,18 @@ status only, while the gateway pauses activation until the CAL has been saved.
 Optional target `licenseUsername` changes only narrow licensing metadata, not
 the UTF-16 NLA account. See [the exact licensing profile](changes/0011-licensing-integration.md)
 for supported fields, 24 KiB CAL and 32-record limits and unqualified server cases.
+
+
+## Microphone redirection
+
+Microphone samples travel through the existing authenticated WebSocket and RDP
+DVC transport. No second media server, additional socket or device permission
+is granted to the gateway. The browser owns the microphone and exposes a separate
+Start/Stop control after the server requests AUDIO_INPUT. The channel offer is
+disabled by default; no automatic capture is enabled by a saved profile.
+
+The gateway-hosted same-origin workspace permits `microphone=(self)`. All browser
+permission, secure-context and local-network policies still apply to separately
+hosted Pages. Use the supported same-origin workspace or trusted HTTPS gateway
+rather than disabling browser protections. PCM16 is supported; compressed audio,
+cameras and generic device redirection remain outside this feature.
