@@ -87,32 +87,41 @@ def main() -> None:
                                 if output.count(text) >= count: return
                                 if time.monotonic() >= deadline: raise AssertionError(output)
                                 page.wait_for_timeout(50)
+                        def wait_probe(expression: str) -> None:
+                            # Poll a function using the automation protocol, not
+                            # string eval inside the page's CSP-constrained RAF.
+                            deadline = time.monotonic() + 15
+                            while not page.evaluate('() => (' + expression + ')'):
+                                if time.monotonic() >= deadline:
+                                    probe = page.evaluate('() => ({starts: audioProbe.starts, consumed: audioProbe.consumed, states: audioProbe.contexts.map(c => c.state)})')
+                                    raise AssertionError({'condition': expression, 'probe': probe, 'pageErrors': errors})
+                                page.wait_for_timeout(25)
                         wait_log('AUDIO_READY')
                         canvas = page.locator('.screen-host canvas')
                         # Remote audio must not automatically create a browser audio device.
                         canvas.focus(); canvas.press('a')
-                        page.wait_for_function('audioProbe.consumed.length === 2')
-                        assert page.evaluate('audioProbe.contexts.length') == 0
-                        assert page.evaluate('audioProbe.starts.length') == 0
-                        assert page.evaluate('audioProbe.consumed.every(x => x.disposition === "dropped")')
+                        wait_probe('audioProbe.consumed.length === 2')
+                        assert page.evaluate('() => audioProbe.contexts.length') == 0
+                        assert page.evaluate('() => audioProbe.starts.length') == 0
+                        assert page.evaluate('() => audioProbe.consumed.every(x => x.disposition === "dropped")')
                         wait_log('AUDIO_CONFIRM', 2)
                         page.get_by_role('button', name='Allow PCM audio playback for this session', exact=True).click()
-                        page.wait_for_function('audioProbe.contexts.length === 1 && audioProbe.contexts[0].state === "running"')
+                        wait_probe('audioProbe.contexts.length === 1 && audioProbe.contexts[0].state === "running"')
                         canvas.focus(); canvas.press('a')
-                        page.wait_for_function('audioProbe.consumed.filter(x => x.disposition === "played").length === 2')
-                        starts = page.evaluate('audioProbe.starts')
+                        wait_probe('audioProbe.consumed.filter(x => x.disposition === "played").length === 2')
+                        starts = page.evaluate('() => audioProbe.starts')
                         assert len(starts) == 2, starts
                         assert all(x == {'channels': 2, 'frames': 4800, 'rate': 48000, 'left': 0.5, 'right': -0.5} for x in starts), starts
                         wait_log('AUDIO_CONFIRM', 4)
                         page.get_by_label('Remote sound volume').evaluate("el => { el.value = '25'; el.dispatchEvent(new Event('input', {bubbles:true})); }")
                         page.get_by_role('button', name='Stop queued audio and mute this session', exact=True).click()
                         canvas.focus(); canvas.press('a')
-                        page.wait_for_function('audioProbe.consumed.length === 6')
-                        assert page.evaluate('audioProbe.starts.length') == 2
-                        assert page.evaluate('audioProbe.consumed.slice(4).every(x => x.disposition === "dropped")')
+                        wait_probe('audioProbe.consumed.length === 6')
+                        assert page.evaluate('() => audioProbe.starts.length') == 2
+                        assert page.evaluate('() => audioProbe.consumed.slice(4).every(x => x.disposition === "dropped")')
                         wait_log('AUDIO_CONFIRM', 6)
                         page.get_by_role('button', name='Disconnect and close session', exact=True).click()
-                        page.wait_for_function('audioProbe.contexts[0].state === "closed"')
+                        wait_probe('audioProbe.contexts[0].state === "closed"')
                         assert not errors, errors
                         print(json.dumps({'pcm': 'stereo 48 kHz 16-bit', 'waveInfoAndWave2': True,
                             'browserWebAudioPlayed': 2, 'mutedOrNotEnabledDropped': 4, 'serverConfirmations': 6,
