@@ -4,7 +4,7 @@
 
 The browser owns the workspace, user input, post-security RDP protocol parsing and remote display. Each session creates one module worker. The worker owns its WebSocket, stream framer, MCS/Share state, static/dynamic channels, pointer cache and bitmap decoder. The main thread owns DOM and GPU/Canvas resources. Binary render payloads cross the worker boundary using transferable ArrayBuffers rather than JSON or base64.
 
-The Node process owns the TCP socket, server certificate policy, X.224 security negotiation, TLS and CredSSP/NTLMv2. After those handshakes it forwards the TLS plaintext stream to the worker. The bridge does not decode the desktop or rasterize it, but it necessarily has visibility of the bytes and credentials. This boundary makes the bridge a credential-handling application, not an untrusted relay.
+The Node process owns the TCP socket, server certificate policy, X.224 security negotiation, TLS and CredSSP/NTLMv2. After those handshakes a Node-only licensing filter observes the real MCS identities, consumes licensing PDUs and sends their responses. It pauses the ordered stream while persisting an issued CAL and notifies the worker using payload-free licensing status messages. Only after validated completion does it release activation and resume direct server-stream forwarding. The bridge does not decode the desktop or rasterize it, but it necessarily has visibility of the bytes and credentials. This boundary makes the bridge a credential-handling application, not an untrusted relay.
 
 ## 2. Session state machine
 
@@ -16,7 +16,7 @@ Any nonterminal state → failed / closed
 
 `Session.receive()` feeds `Framer`, which distinguishes TPKT from fast-path output and preserves stream boundaries across arbitrary socket reads. Slow-path payloads pass through X.224 and MCS before Share Control/Data or static-channel dispatch. A protocol error terminates the session instead of guessing how to recover after stream desynchronization.
 
-Desktop dimensions become authoritative only after Demand Active / reactivation. A display-control request does not merely resize a local canvas. The server must confirm the new desktop through the session protocol. Capability negotiation deliberately selects the implemented bitmap profile; drawing-order support, bulk compression, surface/advanced codec capabilities and device redirection are not advertised.
+Desktop dimensions become authoritative only after Demand Active / reactivation. A display-control request does not merely resize a local canvas. The server must confirm the new desktop through the session protocol. Capability negotiation deliberately selects the implemented bitmap profile; drawing-order support, surface/advanced codec capabilities and device redirection are not advertised. MPPC 8/64 KiB receive compression and bounded planar bitmap support are implemented.
 
 `Session` requires already verified security establishment. Its default protocol selection is not proof that a socket was authenticated; transport adapters must perform the handshake and pass the actual requested/selected protocol values. `RdpConnection` is the provided implementation of that precondition.
 
@@ -83,6 +83,7 @@ export function createProtocolClient(transport, negotiated, onEvent) {
             bpp: 24,
             selectedProtocol: negotiated.selectedProtocol,
             requestedProtocols: negotiated.requestedProtocols,
+            licensing: negotiated.licensing,
             username: negotiated.username,
             domain: negotiated.domain,
             // NLA credentials were already delegated by the trusted bridge.
@@ -92,6 +93,8 @@ export function createProtocolClient(transport, negotiated, onEvent) {
         },
     });
     transport.onBytes = bytes => session.receive(bytes);
+    // Only controls from the authenticated gateway are accepted.
+    transport.onLicensing = result => session.licensingResult(result);
     session.start();
     return session;
 }

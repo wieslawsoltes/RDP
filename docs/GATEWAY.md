@@ -82,3 +82,22 @@ preserves the CURRENT explicitly selected gateway address, never silently
 restores an older endpoint, and does not store passwords for automatic retry.
 This is a new authentication, not RDP auto-reconnect-cookie session resumption.
 See `docs/changes/0010-connection-health.md` for implementation/test scope.
+
+## Licensing cache
+
+The CLI now owns the authenticated RDP licensing exchange and its private cache.
+By default the store is `.rdp-gateway/licenses`; set `--license-dir /private/path`
+to choose another protected directory outside the browser source/build roots.
+`installation.key` and `licenses.bin` belong together and must never be published.
+Do not delete or rotate the installation identity as an attempted licensing
+bypass. `owner.lock` is intentionally retained after a crash; verify no gateway
+is running before removing a stale lock. Cache tamper, missing keys and server
+licensing denials fail closed, not as a successful connection.
+
+`node apps/bridge/server.js` and an embedded `createBridge()` without an adapter
+use an in-memory store instead; use the gateway CLI for persistent CALs. Explicit
+store adapters are owned by their embedding caller. The browser gets licensing
+status only, while the gateway pauses activation until the CAL has been saved.
+Optional target `licenseUsername` changes only narrow licensing metadata, not
+the UTF-16 NLA account. See [the exact licensing profile](changes/0011-licensing-integration.md)
+for supported fields, 24 KiB CAL and 32-record limits and unqualified server cases.

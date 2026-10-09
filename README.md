@@ -76,7 +76,7 @@ Omit `caFile` to use the Node trust store. For a private self-signed certificate
 
 Restart the process after editing the allowlist. In the connection form, paste the bridge token, load the targets, select a target ID, and supply the account credentials. NLA is the default. TLS-only mode is offered only for targets explicitly configured with `allowTlsOnly: true`; the application does not silently retry with weaker authentication.
 
-**Important interoperability limit:** licensing currently accepts only the server's valid-client licensing alert. License issuance, CAL persistence, and renewal are not implemented. A real server requesting those exchanges will fail with an explicit error. Kerberos-only environments, gateway-only access, and unsupported authentication variants also will not work. No Windows version is presently qualified by the included evidence.
+**Licensing:** the current gateway implements valid-client alerts, RSA license requests, authenticated platform challenges, server-issued CALs, cached-license presentation and server-directed upgrades/renewal. The gateway CLI persists CALs in a private encrypted cache and waits for persistence before allowing desktop activation. The low-level direct browser transport still only accepts valid-client alerts. This is a bounded 24 KiB CAL / unsegmented-MCS profile, not every licensing server or redirect configuration. See [licensing integration](docs/changes/0011-licensing-integration.md). Kerberos-only and Microsoft RD Gateway environments remain unsupported. No Windows version is presently independently qualified.
 
 The browser can choose only an administrator-defined target ID, never an arbitrary TCP host. Saved profiles contain connection metadata, not passwords or bridge tokens. `.rdp` import/export is a metadata convenience, not complete `.rdp` file compatibility; imported addresses must be mapped to an allowlisted target.
 
@@ -110,7 +110,7 @@ The browser-to-bridge HTTPS certificate and bridge-to-RDP certificate are separa
 | Display control | Reliable dynamic channels and one-primary-monitor resize through the display-control channel and server reactivation. No multi-monitor layout. |
 | Diagnostics | Measured packet/byte/bitmap counters, renderer submission cost, presented-frame rate, optional GPU timestamps when available, bridge-only RTT, downloadable reports. |
 
-Audio, microphones, webcams, drive/USB/printer/smart-card redirection, RemoteApp, Microsoft RD Gateway, UDP/multitransport, advanced graphics codecs, general drawing orders, and full licensing are **not implemented**. The complete distinctions are in [PROTOCOL_MATRIX.md](docs/PROTOCOL_MATRIX.md).
+Microphones, webcams, drive/USB/printer/smart-card redirection, RemoteApp, Microsoft RD Gateway, UDP/multitransport, advanced graphics codecs, general drawing orders, and licensing beyond the documented profile are **not implemented**. Opt-in PCM sound output and gateway-managed CAL exchange are implemented. The complete distinctions are in [PROTOCOL_MATRIX.md](docs/PROTOCOL_MATRIX.md).
 
 ## Architecture
 
@@ -172,7 +172,7 @@ browser and certificate/permission configuration.
 
 ## Source organization
 
-`packages/binary`, `protocol`, `channels`, `codecs`, `render`, `input`, `profiles`, `security`, `transport`, and `lab` are native ES modules with granular files. The protocol/codec/channel core can be imported without a browser or Node transport. Security and transport modules require Node. The web GUI is in `apps/client`; the bridge is in `apps/bridge`. They are source modules, not separately published npm packages in this release.
+`packages/binary`, `protocol`, `channels`, `codecs`, `render`, `input`, `profiles`, `security`, `licensing`, `transport`, and `lab` are native ES modules with granular files. The protocol/codec/channel core can be imported without a browser or Node transport. Security, licensing and transport modules require Node; licensing keys and CALs are never shipped in the browser build. The web GUI is in `apps/client`; the bridge is in `apps/bridge`. They are source modules, not separately published npm packages in this release.
 
 [Protocol matrix](docs/PROTOCOL_MATRIX.md) · [Architecture](docs/ARCHITECTURE.md) · [Security](docs/SECURITY.md) · [Testing](docs/TESTING.md) · [Public specification sources](docs/SOURCES.md) · [Qualification roadmap](docs/ROADMAP.md)
 

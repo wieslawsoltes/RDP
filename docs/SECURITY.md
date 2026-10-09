@@ -14,7 +14,7 @@ Target TLS authentication normally uses the Node trust store or an explicit CA b
 
 TLS-only mode must be enabled on a particular target and chosen by the user. NLA failures do not trigger silent TLS-only fallback. Plain RDP Security, RC4-encrypted legacy RDP sessions and NTLMv1 are not accepted.
 
-The original MD4 and RC4 implementations exist solely for NTLMv2 compatibility inside the TLS-protected authentication exchange. They are not offered as general modern cryptographic primitives. CredSSP 5/6 processing verifies the server's nonce-bound public-key hash before delegating password credentials. Negative tests verify that a wrong server binding prevents delegation. The authentication tests use a co-developed peer and cannot replace review of Windows interoperability or cryptographic implementation details.
+MD4 exists for NTLMv2 compatibility; RC4 is used only by NTLMv2 and the specified RDP licensing exchange, both inside independently verified TLS. These protocol-mandated legacy algorithms do not weaken the TLS requirement. They are not offered as general modern cryptographic primitives. CredSSP 5/6 processing verifies the server's nonce-bound public-key hash before delegating password credentials. Negative tests verify that a wrong server binding prevents delegation. The authentication tests use a co-developed peer and cannot replace review of Windows interoperability or cryptographic implementation details.
 
 ## Browser origin and endpoint policy
 
@@ -33,3 +33,21 @@ Some binary buffers are cleared on disposal and credential references are discar
 There is no OS keychain/vault integration, user account system, Kerberos delegation policy, smart-card logon, Remote Credential Guard, Restricted Admin implementation, recording policy, malware scanning, clipboard DLP, intrusion detection, security certification or automatic update channel. Device redirection is intentionally absent rather than partially exposed without ownership and consent policy.
 
 Before production use, require an independent audit of the custom WebSocket, ASN.1, NTLMv2, CredSSP and binary protocol parsers; long-running stateful/coverage-guided fuzzing; Windows interoperability captures under a controlled consented lab; resource-exhaustion testing; GPU driver/browser matrix testing; dependency/runtime patch policy; and deployment-specific credential/access controls.
+
+## Licensing and stored CALs
+
+The gateway owns licensing keys and receives their public parameters only from
+its certificate-verified RDP connection. The browser cannot supply a licensing
+key, complete an exchange by control message, or send licensing PDUs through the
+protected gateway path. CALs remain opaque server-issued data. Integrity and
+cache failures terminate the exchange; activation waits for successful storage.
+The legacy licensing MAC/RC4 is protocol compatibility inside verified TLS,
+not a replacement for TLS or a modern general-purpose cryptosystem.
+
+The CLI's persistent store uses AES-256-GCM with a stable installation identity,
+exclusive process ownership and atomic writes. Protect the key and cache together;
+access to both defeats at-rest encryption. POSIX mode/ownership checks are
+implemented; Windows deployments need an appropriately private account ACL.
+There is no hardware/keychain-bound key protection. No local license is minted
+and no server rejection is converted to an entitlement. See the resource,
+interop and backup boundaries in [licensing integration](changes/0011-licensing-integration.md).
