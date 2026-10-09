@@ -64,3 +64,21 @@ Disconnect cancels timers and clears queued binary data. The existing reverse
 direction receive-credit flow remains independent. Legacy clients can still
 use the previous bounded-write mode; use the matching updated gateway for
 large clipboard transfers. Gateway source is never included in Pages assets.
+
+## Connection health and reconnection
+
+The session footer reports gateway responsiveness separately from RDP state.
+The browser worker keeps one correlated application probe outstanding, warns
+at ten seconds without its pong and fails at twenty seconds. Opening the
+WebSocket, completing TLS/NLA and activating/reactivating RDP have independent
+15/35/60-second limits. A responsive active session is not disconnected just
+because its desktop is idle. Worker suspension delays observation of deadlines;
+overdue work is checked on resume. These probes do not measure server liveness.
+
+After failure, remote input/resize is disabled and clipboard/audio state is
+released. Reconnect returns sanitized metadata to setup, closes the old tab,
+clears the gateway token/password and requires fresh target discovery. It
+preserves the CURRENT explicitly selected gateway address, never silently
+restores an older endpoint, and does not store passwords for automatic retry.
+This is a new authentication, not RDP auto-reconnect-cookie session resumption.
+See `docs/changes/0010-connection-health.md` for implementation/test scope.
