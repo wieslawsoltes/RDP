@@ -114,3 +114,32 @@ test('Direct and gateway sessions reject premature, duplicate and wrong-plane co
     assert.throws(() => gateway.licensingResult({ complete: 1, status: 'valid-client' }), { code: 'LICENSE_RESULT' });
     gateway.close();
 });
+
+test('Rejected licensing frames are wiped even when inspection or enqueueing throws', async t => {
+    const p = pair(t); await until(() => p.session.state === 'active');
+    const client = Uint8Array.of(0, 2);
+    assert.throws(() => p.gate.clientFramer.onFrame(client, 'fastpath'), { code: 'LICENSE_CLIENT_FRAME' });
+    assert.ok(client.every(value => value === 0));
+    const inspect = p.gate.inspectClient;
+    let observed;
+    p.gate.inspectClient = packet => { observed = packet; throw new Error('injected inspection failure'); };
+    const packet = sendData(p.peer.userId, p.peer.ioChannel, new Writer().u32le(0x80).put(F.status()).finish());
+    assert.throws(() => p.gate.client(packet), /injected inspection failure/);
+    assert.ok(observed.every(value => value === 0)); assert.ok(packet.some(value => value !== 0));
+    p.gate.inspectClient = inspect;
+    const server = Uint8Array.of(3, 0, 0, 7, 2, 0xf0, 0x80);
+    p.gate.queuedBytes = 1024 * 1024;
+    assert.throws(() => p.gate.serverFramer.onFrame(server, 'tpkt'), { code: 'LICENSE_QUEUE' });
+    assert.ok(server.every(value => value === 0));
+});
+test('Failed licensing drains close before any transport resume', async t => {
+    const p = pair(t, { mode: 'bad-license' });
+    const phases = [];
+    p.gate.resume = () => phases.push(p.gate.phase);
+    await until(() => p.failure);
+    const resumeCount = phases.length;
+    await sleep(5);
+    assert.equal(p.gate.closed, true); assert.equal(p.gate.busy, false);
+    assert.equal(phases.length, resumeCount);
+    assert.ok(!phases.includes('closed'));
+});

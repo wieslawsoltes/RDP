@@ -44,14 +44,18 @@ export class GatewayLicensing {
         this.complete = false; this.closed = false; this.busy = false;
         this.queue = []; this.queuedBytes = 0; this.clientFrames = null; this.engine = null;
         this.serverFramer = new Framer((packet, kind) => {
-            requireThat(this.queue.length < 4096 && this.queuedBytes + packet.length <= MAX_BUFFERED,
-                'LICENSE_QUEUE', 'Too much data queued during licensing');
-            this.queue.push({ packet: packet.slice(), kind }); this.queuedBytes += packet.length; packet.fill(0);
+            try {
+                requireThat(this.queue.length < 4096 && this.queuedBytes + packet.length <= MAX_BUFFERED,
+                    'LICENSE_QUEUE', 'Too much data queued during licensing');
+                this.queue.push({ packet: packet.slice(), kind }); this.queuedBytes += packet.length;
+            } finally { packet.fill(0); }
         }, MAX_BUFFERED);
         this.clientFramer = new Framer((packet, kind) => {
-            requireThat(kind === 'tpkt', 'LICENSE_CLIENT_FRAME', 'This gateway profile expects slow-path client input');
-            this.inspectClient(packet);
-            this.clientFrames.push(packet.slice()); packet.fill(0);
+            try {
+                requireThat(kind === 'tpkt', 'LICENSE_CLIENT_FRAME', 'This gateway profile expects slow-path client input');
+                this.inspectClient(packet);
+                this.clientFrames.push(packet.slice());
+            } finally { packet.fill(0); }
         }, MAX_BUFFERED);
     }
     client(bytes) {
