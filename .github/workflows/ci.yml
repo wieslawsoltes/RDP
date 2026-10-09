@@ -20,6 +20,22 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: '22'
-      - run: npm run check
-      - run: npm test
-      - run: npm run test:fuzz
+      - name: Validate exact source and preserve evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/rdp-verified
+          npm run check | tee /tmp/rdp-verified/syntax.txt
+          npm test | tee /tmp/rdp-verified/tests.tap
+          npm run test:fuzz | tee /tmp/rdp-verified/fuzz.txt
+          git rev-parse HEAD > /tmp/rdp-verified/REVISION
+          git archive --format=tar --prefix=RDP/ HEAD > /tmp/rdp-verified/source.tar
+          cd /tmp/rdp-verified
+          sha256sum source.tar REVISION syntax.txt tests.tap fuzz.txt > SHA256SUMS
+      - name: Upload verified source and results
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: verified-source
+          path: /tmp/rdp-verified/
+          retention-days: 7
+          if-no-files-found: error

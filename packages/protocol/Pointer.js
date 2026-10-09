@@ -2,11 +2,23 @@ import { Reader } from '../binary/Reader.js';
 import { requireThat } from '../binary/ProtocolError.js';
 /** Cursor pixels retain AND/XOR semantics, including destination inversion. */
 export function parsePointerShape(bytes, newPointer = false) {
+    return parseShape(bytes, newPointer, false);
+}
+
+/** TS_FP_LARGEPOINTERATTRIBUTE after fast-path decompression/reassembly. */
+export function parseLargePointerShape(bytes) {
+    return parseShape(bytes, true, true);
+}
+
+function parseShape(bytes, newPointer, large) {
+    requireThat(bytes instanceof Uint8Array && bytes.length <= 608277, 'POINTER_INPUT', 'Pointer payload exceeds the maximum encoded shape');
     const r = new Reader(bytes), bpp = newPointer ? r.u16le() : 24;
     requireThat([1, 4, 8, 15, 16, 24, 32].includes(bpp), 'POINTER_BPP', 'Invalid pointer color depth');
     requireThat(![4, 8].includes(bpp), 'POINTER_PALETTE', 'Paletted pointers are not supported by this profile');
-    const cacheIndex = r.u16le(), hotX = r.u16le(), hotY = r.u16le(), width = r.u16le(), height = r.u16le(), andLength = r.u16le(), xorLength = r.u16le();
-    requireThat(cacheIndex < 32 && width > 0 && height > 0 && width <= 96 && height <= 96 && hotX < width && hotY < height, 'POINTER_SIZE', 'Invalid pointer dimensions or cache index');
+    const cacheIndex = r.u16le(), hotX = r.u16le(), hotY = r.u16le(), width = r.u16le(), height = r.u16le();
+    const andLength = large ? r.u32le() : r.u16le(), xorLength = large ? r.u32le() : r.u16le();
+    const maximum = large ? 384 : 96;
+    requireThat(cacheIndex < 32 && width > 0 && height > 0 && width <= maximum && height <= maximum && hotX < width && hotY < height, 'POINTER_SIZE', 'Invalid pointer dimensions or cache index');
     const xorStride = (Math.ceil(width * bpp / 8) + 1) & ~1, andStride = (Math.ceil(width / 8) + 1) & ~1;
     requireThat(xorLength === xorStride * height && (andLength === andStride * height || (bpp === 32 && andLength === 0)), 'POINTER_LENGTH', 'Invalid pointer mask lengths');
     const xor = r.take(xorLength), and = r.take(andLength);
@@ -36,7 +48,9 @@ export function parsePointerShape(bytes, newPointer = false) {
 }
 export class PointerCache {
     constructor(emit) { this.emit = emit; this.cache = new Map(); }
-    shape(bytes, isNew) { const shape = parsePointerShape(bytes, isNew); this.cache.set(shape.cacheIndex, shape); this.emit({ type: 'shape', shape }); }
+    store(shape) { this.cache.set(shape.cacheIndex, shape); this.emit({ type: 'shape', shape }); }
+    shape(bytes, isNew) { this.store(parsePointerShape(bytes, isNew)); }
+    large(bytes) { this.store(parseLargePointerShape(bytes)); }
     cached(bytes) { const r = new Reader(bytes), id = r.u16le(); r.end(); requireThat(this.cache.has(id), 'POINTER_CACHE', 'Pointer cache miss'); this.emit({ type: 'shape', shape: this.cache.get(id) }); }
     position(bytes) { const r = new Reader(bytes), x = r.u16le(), y = r.u16le(); r.end(); this.emit({ type: 'position', x, y }); }
     system(bytes) { const r = new Reader(bytes), value = r.u32le(); r.end(); requireThat(value === 0 || value === 0x7f00, 'POINTER_SYSTEM', 'Invalid system pointer'); this.emit({ type: value === 0 ? 'hidden' : 'default' }); }

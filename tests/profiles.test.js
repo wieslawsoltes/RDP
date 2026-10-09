@@ -16,7 +16,7 @@ test('Profiles persist explicit metadata only, never credentials or bridge token
 });
 test('Malformed storage and imported dimensions are constrained', () => {
     assert.deepEqual(new Profiles({ getItem: () => '{broken' }).items, []);
-    const p = sanitizeProfile({ width: 8192, height: 8192, bpp: 32, backend: 'javascript:evil', security: 'rdp', name: 'a\r\nb\0' });
+    const p = sanitizeProfile({ width: 8192, height: 8192, bpp: 64, backend: 'javascript:evil', security: 'rdp', name: 'a\r\nb\0' });
     assert.equal(p.width, 1280);
     assert.equal(p.bpp, 24);
     assert.equal(p.backend, 'auto');
