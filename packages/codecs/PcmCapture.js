@@ -52,12 +52,12 @@ export class PcmCapture {
             planes[0] instanceof Float32Array && planes[0].length > 0 && planes[0].length <= 4096 &&
             planes.every(p => p instanceof Float32Array && p.length === planes[0].length),
             'MIC_SAMPLES', 'Invalid bounded capture chunk');
-        for (let i = 0; i < planes[0].length; i++) {
+        for (let i = 0; i < planes[0].length && !this.closed; i++) {
             const left = clean(planes[0][i]), right = clean((planes[1] || planes[0])[i]);
             if (!this.table) { this.output(left, right); continue; }
             const slot = this.received++ & MASK;
             this.history[0][slot] = left; this.history[1][slot] = right;
-            while (this.center + HALF < this.received) {
+            while (!this.closed && this.center + HALF < this.received) {
                 const phase = Math.floor(this.fraction * PHASES / this.format.sampleRate) * TAPS;
                 let l = 0, r = 0;
                 for (let k = 0; k < TAPS; k++) {
@@ -67,6 +67,7 @@ export class PcmCapture {
                     l += this.history[0][at & MASK] * weight; r += this.history[1][at & MASK] * weight;
                 }
                 this.output(l, r);
+                if (this.closed) break; // A synchronous transport failure may close this encoder.
                 this.fraction += this.inputRate;
                 this.center += Math.floor(this.fraction / this.format.sampleRate);
                 this.fraction %= this.format.sampleRate;

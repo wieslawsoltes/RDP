@@ -122,3 +122,36 @@ test('PCM capture owns bounded state, clears on failure and validates shape/conf
     for (const f of [{ ...format(), bits: 8 }, { ...format(), sampleRate: 1 }])
         assert.throws(() => new PcmCapture({ inputRate: 48000, format: f, framesPerPacket: 1, emit() {} }), ProtocolError);
 });
+
+
+test('PCM capture does not refill cleared history after a synchronous owner close', () => {
+    for (const inputRate of [48000, 44100, 192000, 8000]) {
+        let calls = 0, encoder;
+        encoder = new PcmCapture({ inputRate, format: format(), framesPerPacket: 1,
+            emit() { calls++; encoder.close(); } });
+        encoder.push([new Float32Array(512).fill(0.5)]);
+        assert.equal(calls, 1); assert.equal(encoder.closed, true);
+        assert.ok(encoder.packet.every(v => !v));
+        assert.ok(encoder.history.every(p => p.every(v => !v)));
+        assert.equal(encoder.at, 0); assert.equal(encoder.fraction, 0);
+    }
+});
+test('AUDIN clears the partial encoder when a transport callback throws', () => {
+    const h = fixture(); h.init(); h.mic.ready(1, 1);
+    h.capture([0.5]); const encoder = h.mic.encoder;
+    h.mic.send = () => { throw new Error('disconnected transport'); };
+    assert.throws(() => h.capture(), /disconnected transport/);
+    assert.equal(h.mic.encoder, null); assert.equal(encoder.closed, true);
+    assert.ok(encoder.history.every(p => p.every(v => !v)));
+    assert.ok(encoder.packet.every(v => !v)); h.mic.close();
+});
+
+
+test('AUDIN stops the current chunk when backpressure begins during packetization', () => {
+    const h = fixture(); h.init(); h.mic.ready(1, 1);
+    let checks = 0;
+    h.mic.canSend = () => ++checks <= 2; // Allow outer check and first packet only.
+    h.capture(Array(13).fill(1));
+    assert.equal(h.mic.sentPackets, 1); assert.equal(h.mic.droppedChunks, 1);
+    assert.equal(h.mic.encoder, null); assert.equal(checks, 3); h.mic.close();
+});

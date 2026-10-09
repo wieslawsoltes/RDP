@@ -109,13 +109,17 @@ export class AudioInputChannel {
             this.encoder?.close();
             this.encoder = new PcmCapture({ inputRate: sampleRate, format: this.formats[this.index], framesPerPacket: this.frames,
                 emit: data => {
-                    if (!this.canSend(data.length + 2048)) { this.droppedChunks++; return; }
+                    if (!this.canSend(data.length + 2048)) {
+                        this.droppedChunks++; this.encoder?.close(); this.encoder = null; return;
+                    }
                     const packet = new Writer().u8(6).put(data).finish();
                     try { this.send(Uint8Array.of(5)); this.send(packet); this.sentPackets++; this.sentBytes += data.length; }
                     finally { packet.fill(0); }
                 } });
         }
-        this.encoder.push(planes); return true;
+        try { this.encoder.push(planes); }
+        catch (error) { this.encoder?.close(); this.encoder = null; throw error; }
+        return this.state === 'streaming' && this.captureId === captureId;
     }
     stats() { return { state: this.state, sentPackets: this.sentPackets, sentBytes: this.sentBytes, droppedChunks: this.droppedChunks, rejected: this.rejected }; }
     close() {
