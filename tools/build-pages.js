@@ -45,7 +45,8 @@ export async function buildPages(output = join(root, 'dist/pages')) {
     await writeFile(join(output, '.nojekyll'), '');
     await copyFile(join(root, 'LICENSE'), join(output, 'LICENSE'));
     const sha = /^[0-9a-f]{40}$/.test(process.env.GITHUB_SHA || '') ? process.env.GITHUB_SHA : 'local';
-    const published = ['index.html', '.nojekyll', 'LICENSE', ...files].sort();
+    // .nojekyll controls deployment; GitHub Pages does not serve it as a public asset.
+    const published = ['index.html', 'LICENSE', ...files].sort();
     const hashes = {};
     for (const name of published) hashes[name] = createHash('sha256').update(await readFile(join(output, name))).digest('hex');
     const manifest = { version: 1, commit: sha, hosting: 'static-browser-client', gateway: 'runs separately on the user machine', files: published, sha256: hashes };

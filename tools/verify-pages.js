@@ -7,7 +7,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 const MAX_MANIFEST_BYTES = 128 * 1024;
 const MAX_ASSET_BYTES = 16 * 1024 * 1024;
 const MAX_TOTAL_BYTES = 64 * 1024 * 1024;
-const required = ['index.html', '.nojekyll', 'LICENSE', 'apps/client/app.js', 'apps/client/session-worker.js'];
+const required = ['index.html', 'LICENSE', 'apps/client/app.js', 'apps/client/session-worker.js'];
 const browserPath = /^(?:apps\/client|packages\/(?:binary|channels|codecs|input|lab|profiles|protocol|render))\/(?:[A-Za-z0-9_-]+\/)*[A-Za-z0-9_][A-Za-z0-9_.-]*\.(?:html|js|css|svg|png|ico|wgsl)$/;
 const ensure = (condition, message) => { if (!condition) throw new Error(message); };
 
@@ -23,7 +23,7 @@ export function validatePagesManifest(value, expectedCommit) {
     const files = new Set();
     for (const name of value.files) {
         ensure(typeof name === 'string' && name.length <= 240 && !name.split('/').includes('..') &&
-            (['index.html', '.nojekyll', 'LICENSE'].includes(name) || browserPath.test(name)) &&
+            (['index.html', 'LICENSE'].includes(name) || browserPath.test(name)) &&
             !files.has(name), 'Invalid or duplicate Pages asset path');
         ensure(Object.hasOwn(value.sha256, name) && /^[a-f0-9]{64}$/.test(value.sha256[name]), 'Invalid asset hash');
         files.add(name);
@@ -43,12 +43,42 @@ function publicationUrl(value) {
     return url;
 }
 
+/** Settle even when a custom fetch or stream does not implement cancellation. */
+function abortable(operation, signal) {
+    return new Promise((resolve, reject) => {
+        const aborted = () => reject(signal.reason);
+        signal.addEventListener('abort', aborted, { once: true });
+        if (signal.aborted) aborted();
+        Promise.resolve(operation).then(value => {
+            signal.removeEventListener('abort', aborted); resolve(value);
+        }, error => {
+            signal.removeEventListener('abort', aborted); reject(error);
+        });
+    });
+}
+
+function cancelBody(body) {
+    // A transport cancellation promise can itself remain pending. Do not make
+    // cancellation completion a prerequisite for settling a failed request.
+    try { Promise.resolve(body?.cancel()).catch(() => {}); } catch { /* Already closed/locked. */ }
+}
+
 async function responseBytes(url, { fetchImpl, signal, timeout, limit, consume, mime }) {
-    const deadline = AbortSignal.timeout(timeout);
-    const response = await fetchImpl(url, { redirect: 'error', credentials: 'omit', cache: 'no-store',
-        signal: AbortSignal.any([signal, deadline]), headers: { 'Cache-Control': 'no-cache' } });
-    let reader;
+    const deadline = new AbortController();
+    // Keep the deadline referenced: AbortSignal.timeout alone does not keep the
+    // Node process alive while a failed stream's cancellation is outstanding.
+    const timer = setTimeout(() => deadline.abort(new Error(`Request timeout: ${url.pathname}`)), timeout);
+    const requestSignal = AbortSignal.any([signal, deadline.signal]);
+    let response, reader;
     try {
+        requestSignal.throwIfAborted();
+        const pending = Promise.resolve(fetchImpl(url, { redirect: 'error', credentials: 'omit', cache: 'no-store',
+            signal: requestSignal, headers: { 'Cache-Control': 'no-cache' } }));
+        // A custom transport may resolve after cancellation. Release its body
+        // without returning it to the now-cancelled request.
+        pending.then(value => { if (requestSignal.aborted) cancelBody(value?.body); }, () => {});
+        response = await abortable(pending, requestSignal);
+        requestSignal.throwIfAborted();
         ensure(response.status === 200 && !response.redirected, `HTTP ${response.status} for ${url.pathname}`);
         const declared = response.headers.get('content-length');
         ensure(declared === null || /^\d+$/.test(declared) && Number(declared) <= limit, `Oversized response: ${url.pathname}`);
@@ -57,8 +87,8 @@ async function responseBytes(url, { fetchImpl, signal, timeout, limit, consume, 
         reader = response.body.getReader();
         let size = 0;
         while (true) {
-            signal.throwIfAborted(); deadline.throwIfAborted();
-            const { done, value } = await reader.read();
+            requestSignal.throwIfAborted();
+            const { done, value } = await abortable(reader.read(), requestSignal);
             if (done) break;
             size += value.byteLength;
             ensure(size <= limit, `Oversized response: ${url.pathname}`);
@@ -66,9 +96,11 @@ async function responseBytes(url, { fetchImpl, signal, timeout, limit, consume, 
         }
         return size;
     } finally {
-        // Cancelling early failures also releases server sockets and streaming bodies.
-        if (reader) { await reader.cancel().catch(() => {}); reader.releaseLock(); }
-        else if (response.body) await response.body.cancel().catch(() => {});
+        clearTimeout(timer);
+        if (reader) {
+            cancelBody(reader);
+            try { reader.releaseLock(); } catch { /* A non-standard reader may still be cancelling. */ }
+        } else cancelBody(response?.body);
     }
 }
 

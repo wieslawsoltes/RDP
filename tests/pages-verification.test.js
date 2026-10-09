@@ -5,7 +5,7 @@ import { createServer } from 'node:http';
 import { once } from 'node:events';
 import { verifyPages, validatePagesManifest } from '../tools/verify-pages.js';
 const commit = 'f'.repeat(40);
-const assets = { 'index.html': '<html>app</html>', '.nojekyll': '', LICENSE: 'license',
+const assets = { 'index.html': '<html>app</html>', LICENSE: 'license',
     'apps/client/app.js': 'export const start = true;', 'apps/client/session-worker.js': 'onmessage=()=>{};' };
 function manifest() { return { version: 1, hosting: 'static-browser-client', commit,
     files: Object.keys(assets), sha256: Object.fromEntries(Object.entries(assets).map(([k, v]) => [k, createHash('sha256').update(v).digest('hex')])) }; }
@@ -25,7 +25,7 @@ const run = options => verifyPages({ url: 'https://example.test/RDP/', expectedM
 test('Pages verifier hashes every asset against the local build, not just index.html', async () => {
     const seen = [], fetch = fetcher();
     const result = await run({ fetchImpl: (url, opts) => { seen.push(url.pathname); return fetch(url, opts); } });
-    assert.equal(result.verified, true); assert.equal(result.commit, commit); assert.equal(result.files, 5);
+    assert.equal(result.verified, true); assert.equal(result.commit, commit); assert.equal(result.files, 4);
     assert.equal(result.bytes, Object.values(assets).reduce((n, v) => n + Buffer.byteLength(v), 0));
     assert.deepEqual(seen.sort(), ['/RDP/build.json', ...Object.keys(assets).map(p => '/RDP/' + p)].sort());
 });
@@ -48,7 +48,7 @@ test('Pages verifier catches a changed worker, missing files, redirects and inco
     await assert.rejects(run({ fetchImpl: fetcher({ headers: { 'content-type': 'text/plain' } }) }), /content type/);
 });
 test('Pages manifest rejects unsafe paths, excess inventories and hidden hash entries before requests', async () => {
-    for (const path of ['../key', '/outside.js', '//outside.test/a.js', 'apps/client/../bridge/a.js', 'apps/client/%2e%2e/a.js',
+    for (const path of ['.nojekyll', '../key', '/outside.js', '//outside.test/a.js', 'apps/client/../bridge/a.js', 'apps/client/%2e%2e/a.js',
         'apps/client/a.js?token=x', 'apps/client/a.js#part', 'apps/bridge/server.js', 'packages/security/NtlmV2.js',
         'apps/client/x\\y.js', 'apps/client/x.js\n', 'apps/client/.private/a.js']) {
         const m = manifest(); m.files.push(path); m.sha256[path] = '0'.repeat(64);
@@ -87,7 +87,7 @@ test('Pages verifier enforces concurrent request bound and waits for all assets'
         await new Promise(resolve => setTimeout(resolve, 3));
         const response = await fetch(url, opts); active--; finished++; return response;
     } });
-    assert.equal(peak, 2); assert.equal(finished, 6); assert.equal(active, 0); assert.equal(result.verified, true);
+    assert.equal(peak, 2); assert.equal(finished, 5); assert.equal(active, 0); assert.equal(result.verified, true);
 });
 test('Pages verifier exercises actual HTTP subpath requests without browser security overrides', async t => {
     const server = createServer((req, res) => {
@@ -116,4 +116,45 @@ test('Pages verifier rejects oversized chunked assets before hashing the full bo
         }, cancel() { cancelled = true; } }), { headers: { 'content-type': 'text/javascript' } }));
     } }), /Oversized/);
     assert.equal(cancelled, true);
+});
+
+test('Pages verifier deadlines settle even when fetch ignores abort', { timeout: 2000 }, async () => {
+    let requests = 0, retries = 0;
+    await assert.rejects(run({ attempts: 2, requestTimeoutMs: 20, onRetry: () => retries++,
+        fetchImpl: () => { requests++; return new Promise(() => {}); } }), /failed after 2 attempts: Request timeout/);
+    assert.equal(requests, 2); assert.equal(retries, 1);
+});
+test('Pages verifier never waits for a stalled stream cancellation', { timeout: 2000 }, async () => {
+    let cancelled = 0;
+    await assert.rejects(run({ requestTimeoutMs: 20, fetchImpl: () => new Response(new ReadableStream({
+        pull() { return new Promise(() => {}); },
+        cancel() { cancelled++; return new Promise(() => {}); }
+    })) }), /Request timeout/);
+    assert.equal(cancelled, 1);
+});
+test('Pages verifier releases a failed response without awaiting its cancellation', { timeout: 2000 }, async () => {
+    let cancelled = 0;
+    await assert.rejects(run({ fetchImpl: () => new Response(new ReadableStream({
+        cancel() { cancelled++; return new Promise(() => {}); }
+    }), { status: 404 }) }), /HTTP 404/);
+    assert.equal(cancelled, 1);
+});
+test('Pages verifier settles all workers when one fails and siblings ignore abort', { timeout: 2000 }, async () => {
+    const fetch = fetcher(); let blocked = 0;
+    await assert.rejects(run({ concurrency: 4, requestTimeoutMs: 1000, fetchImpl: (url, options) => {
+        if (url.pathname.endsWith('build.json')) return fetch(url, options);
+        if (url.pathname.endsWith('LICENSE')) return new Response('', { status: 404 });
+        blocked++; return new Promise(() => {});
+    } }), /HTTP 404/);
+    assert.equal(blocked, 3);
+});
+test('Pages verifier cancels a transport response that arrives after owner cancellation', { timeout: 2000 }, async () => {
+    let resolveFetch, cancelled = 0;
+    const abort = new AbortController();
+    const verification = run({ signal: abort.signal, fetchImpl: () => new Promise(resolve => { resolveFetch = resolve; }) });
+    abort.abort(new Error('owner cancelled pending fetch'));
+    await assert.rejects(verification, /owner cancelled/);
+    resolveFetch(new Response(new ReadableStream({ cancel() { cancelled++; } })));
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(cancelled, 1);
 });
