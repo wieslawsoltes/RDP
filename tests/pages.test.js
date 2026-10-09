@@ -11,6 +11,9 @@ test('Pages build is subpath-safe and includes all browser imports but no gatewa
     t.after(() => rm(output, { recursive: true, force: true }));
     const manifest = await buildPages(output), files = new Set(manifest.files);
     assert.ok(files.has('apps/client/session-worker.js'));
+    await access(join(output, '.nojekyll'));
+    assert.ok(!files.has('.nojekyll'), 'deployment marker is not a public asset');
+    assert.ok(!Object.hasOwn(manifest.sha256, '.nojekyll'));
     assert.ok(files.has('apps/client/Gateway.js'));
     assert.ok(files.has('packages/render/shaders.js'));
     assert.deepEqual(Object.keys(manifest.sha256).sort(), [...files].sort());
