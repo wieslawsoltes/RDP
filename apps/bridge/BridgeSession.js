@@ -10,6 +10,8 @@ export class BridgeSession {
         this.targets = targets;
         this.state = 'authentication';
         this.outstanding = 0;
+        this.inputOutstanding = this.inputAck = 0;
+        this.inputWindow = 256 * 1024;
         this.window = 512 * 1024;
         this.closed = false;
         this.abort = new AbortController();
@@ -37,7 +39,18 @@ export class BridgeSession {
         if (binary) {
             requireThat(this.state === 'streaming' && value.length > 0 && value.length <= 65536, 'BRIDGE_STATE', 'Binary RDP traffic before security negotiation or packet too large');
             requireThat(this.remote.writableLength + value.length <= 1024 * 1024, 'BACKPRESSURE', 'Server is not accepting client input');
-            this.remote.write(value);
+            if (this.inputFlowControl) {
+                requireThat(this.inputOutstanding + value.length <= this.inputWindow, 'FLOW_CONTROL', 'Gateway input credit exceeded');
+                this.inputOutstanding += value.length;
+                this.remote.write(value, error => {
+                    if (this.closed) return;
+                    if (error) { this.fail('REMOTE_IO', error.message); return; }
+                    this.inputOutstanding -= value.length;
+                    this.inputAck += value.length;
+                    if (this.inputAck >= 64 * 1024) this.flushInputAck();
+                    else if (!this.inputAckTimer) this.inputAckTimer = setTimeout(() => this.flushInputAck(), 2);
+                });
+            } else this.remote.write(value);
             return;
         }
         requireThat(value.length <= 16384, 'CONTROL_LIMIT', 'Bridge control message exceeds limit');
@@ -54,6 +67,7 @@ export class BridgeSession {
                 requireThat(typeof control[key] === 'string' && control[key].length <= 1024 && !control[key].includes('\0'), 'CREDENTIALS', 'Invalid credential field');
             const credentials = { username: control.username, password: control.password, domain: control.domain };
             control.token = control.password = '';
+            this.inputFlowControl = control.inputFlowControl === true;
             this.state = 'negotiating';
             this.negotiate(target, credentials, control.security);
             return;
@@ -86,7 +100,7 @@ export class BridgeSession {
             }
             this.remote = connection.socket;
             this.state = 'streaming';
-            this.peer.sendJSON({ type: 'ready', ...connection.negotiation, certificate: connection.certificate, authentication: connection.authentication });
+            this.peer.sendJSON({ type: 'ready', inputWindow: this.inputFlowControl ? this.inputWindow : 0, ...connection.negotiation, certificate: connection.certificate, authentication: connection.authentication });
             const receive = bytes => {
                 if (this.closed)
                     return;
@@ -113,6 +127,13 @@ export class BridgeSession {
             clearTimeout(timeout);
         }
     }
+    flushInputAck() {
+        clearTimeout(this.inputAckTimer); this.inputAckTimer = null;
+        if (!this.closed && this.inputAck) {
+            const bytes = this.inputAck; this.inputAck = 0;
+            this.peer.sendJSON({ type: 'input-ack', bytes });
+        }
+    }
     fail(code, message) {
         if (!this.closed) {
             this.peer.sendJSON({ type: 'error', code, message: String(message).slice(0, 512) });
@@ -127,6 +148,8 @@ export class BridgeSession {
         this.state = 'closed';
         this.token = null;
         clearTimeout(this.authTimer);
+        clearTimeout(this.inputAckTimer);
+        this.inputAck = this.inputOutstanding = 0;
         clearInterval(this.pingTimer);
         this.abort.abort(new Error('Client disconnected'));
         this.remote?.destroy();

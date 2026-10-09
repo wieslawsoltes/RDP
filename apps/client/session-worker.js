@@ -1,7 +1,8 @@
+import { WireSendQueue } from '../../packages/protocol/WireSendQueue.js';
 import { Session } from '../../packages/protocol/Session.js';
 import { LoopbackServer } from '../../packages/lab/LoopbackServer.js';
 import { LabDesktop } from '../../packages/lab/LabDesktop.js';
-let session, socket, lab, peer, credentials, flushTimer, statsTimer, pingTimer;
+let session, socket, lab, peer, credentials, outbound, flushTimer, statsTimer, pingTimer;
 let stopped = false, queue = [], queuedBytes = 0, wireCredit = 0, nextFrame = 1;
 const inflight = new Map(), pingTimes = new Map();
 const send = value => postMessage(value);
@@ -18,6 +19,7 @@ function stop() {
     clearTimeout(flushTimer);
     clearInterval(statsTimer);
     clearInterval(pingTimer);
+    outbound?.close();
     session?.close();
     lab?.close();
     if (socket?.readyState === 1)
@@ -50,7 +52,10 @@ function event(value) {
     if (['desktop', 'bitmaps', 'palette', 'pointer'].includes(value.type))
         enqueue(value);
     else {
-        send(value);
+        if (value.type === 'clipboard' && value.kind === 'image') {
+            const pixels = value.bytes || value.rgba;
+            postMessage(value, [pixels.buffer]); // Clipboard decoders return owned buffers.
+        } else send(value);
         if (value.type === 'error')
             stop();
     }
@@ -108,9 +113,7 @@ function openSession(options, negotiation) {
                     }
                 });
             else {
-                if (socket.readyState !== 1 || socket.bufferedAmount > 1024 * 1024)
-                    throw new Error('Transport input backpressure limit exceeded');
-                socket.send(bytes);
+                outbound.enqueue(bytes);
             }
         } });
     session.start();
@@ -136,7 +139,7 @@ function start(message) {
     socket = new WebSocket(message.url);
     socket.binaryType = 'arraybuffer';
     socket.onopen = () => {
-        socket.send(JSON.stringify({ type: 'connect', targetId: options.targetId, security: options.security, token: message.token, ...credentials }));
+        socket.send(JSON.stringify({ type: 'connect', inputFlowControl: true, targetId: options.targetId, security: options.security, token: message.token, ...credentials }));
         message.token = message.password = '';
         pingTimer = setInterval(() => {
             if (socket.readyState !== 1 || pingTimes.size > 3)
@@ -153,10 +156,19 @@ function start(message) {
             if (typeof received.data === 'string') {
                 const control = JSON.parse(received.data);
                 if (control.type === 'ready') {
+                    if (outbound || session) throw new Error('Repeated gateway initialization');
+                    outbound = new WireSendQueue({ window: control.inputWindow || 0, send: bytes => {
+                        if (socket.readyState !== 1) throw new Error('Gateway socket is closed');
+                        socket.send(bytes);
+                    }, bufferedAmount: () => socket.bufferedAmount, onError: fail });
                     send({ ...control, type: 'security' });
                     openSession({ ...options, password: options.security === 'tls' ? credentials.password : '' }, control);
                     credentials.password = '';
                     credentials = null;
+                }
+                else if (control.type === 'input-ack') {
+                    if (!outbound) throw new Error('Input acknowledgement before gateway initialization');
+                    outbound.acknowledge(control.bytes);
                 }
                 else if (control.type === 'error')
                     fail(control);
@@ -213,6 +225,13 @@ onmessage = received => {
             session?.text(message.text);
         else if (message.type === 'clipboard')
             session?.setClipboard(message.text);
+        else if (message.type === 'clipboard-content') {
+            try { session?.setClipboardContent(message.content); }
+            finally { message.content?.png?.fill(0); message.content?.image?.rgba?.fill(0); }
+        }
+        else if (message.type === 'clipboard-request') {
+            if (!session?.requestClipboardFormat(message.format)) send({ type: 'notice', message: 'The remote clipboard does not offer that format.' });
+        }
         else if (message.type === 'monitor-layout')
             session?.setMonitors(message.monitors);
         else if (message.type === 'resize')
@@ -223,7 +242,7 @@ onmessage = received => {
             stop();
     }
     catch (error) {
-        if (['input', 'text', 'clipboard', 'resize', 'monitor-layout'].includes(message.type))
+        if (['input', 'text', 'clipboard', 'clipboard-content', 'clipboard-request', 'resize', 'monitor-layout'].includes(message.type))
             send({ type: 'notice', message: error.message });
         else
             fail(error);

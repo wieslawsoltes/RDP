@@ -4,14 +4,39 @@ An independently written RDP browser client with a responsive connection workspa
 
 **Status: experimental bitmap-profile implementation, not a complete RDP implementation or a Windows-qualified production client.** The source is runnable and includes real packet processing, authentication code, a protocol lab, and automated tests. Unsupported capabilities are not advertised. Windows interoperability, GPU execution on physical hardware, and an independent security review remain outstanding. Read [the exact protocol matrix](docs/PROTOCOL_MATRIX.md) before connecting to a real host.
 
-![Connection workspace](test-results/workspace-desktop.png)
+## Browser app and local gateway
+
+Open [the deployed browser app](https://wieslawsoltes.github.io/RDP/). GitHub Pages
+serves the full browser workspace, not a TCP server. The local gateway connects
+it to an explicitly allowlisted RDP host:
+
+```sh
+git clone https://github.com/wieslawsoltes/RDP.git
+cd RDP
+npm run gateway:init
+# Edit .rdp-gateway/targets.json with your server and its trusted CA or pin.
+npm run gateway -- --allow-origin https://wieslawsoltes.github.io
+```
+
+Enter the gateway origin and terminal-issued token in the web app, load its
+allowlisted targets, and connect. For browser policies that reject HTTPS-to-local
+WS, use a trusted local HTTPS/WSS endpoint or the same-origin workspace printed
+by the gateway. Do not disable browser security or TLS verification.
+See [gateway configuration and trust boundaries](docs/GATEWAY.md).
+
+The display options include **HTML and images (opt-in)**. In an active session,
+open **Text clipboard** to explicitly read/send local formats, fetch remote HTML
+or images, and copy received formats to the OS clipboard. Fetching never writes
+to the OS clipboard automatically. HTML stays inert inside this application.
+Image transfers support PNG and uncompressed Windows DIB/DIBV5; file streaming
+is not implemented. See [format coverage and resource limits](docs/changes/0006-rich-clipboard.md).
 
 ## Run the application
 
 Install a maintained Node.js release compatible with Node 22 or newer. There are no npm or other runtime package dependencies and no compilation step.
 
 ```sh
-cd lrdp-web
+cd RDP
 node apps/bridge/server.js
 ```
 
@@ -70,14 +95,14 @@ The browser-to-bridge HTTPS certificate and bridge-to-RDP certificate are separa
 | Workspace | Session tabs, saved metadata profiles, target loading, dark/light themes, responsive layout, desktop fit/native size, screenshots, fullscreen request, diagnostics and error states. |
 | Security transport | Original RFC 6455 bridge transport; TCP, X.224 negotiation, verified TLS, CredSSP 5/6 with NTLMv2, MIC, channel binding, directional signing/sealing, and server binding verification before credential delegation. |
 | Session core | Bounds-checked TPKT/fast-path framing, BER/PER/GCC/MCS, joins, activation/reactivation, selected Share Control/Data PDUs, bitmap updates, palette and pointer caches. |
-| Graphics | Uncompressed 8/15/16/24/32-bit bitmap decoding; interleaved RLE for 8/15/16/24-bit pixels; bottom-up/padded rows; overlapping update ordering; classic AND/XOR and 32-bit alpha pointer handling. |
+| Graphics | Uncompressed 8/15/16/24/32-bit bitmap decoding; interleaved RLE for 8/15/16/24-bit pixels; bottom-up/padded rows; overlapping update ordering; RDP6 planar 32-bit bitmap decoding; classic AND/XOR and 32-bit alpha pointers up to 384×384. |
 | Renderers | WGSL packed-pixel conversion into a persistent RGBA desktop texture and GPU cursor presentation; WebGL2 fallback with CPU pixel conversion; Canvas 2D fallback. GPU implementations have not been runtime-validated in the supplied environment. |
 | Input | Scan-code keys, Unicode UTF-16 input, mouse and wheel, extra mouse buttons, shortcut controls, release-on-blur, pointer capture, touch/pen mapped to mouse. Native RDP multitouch/pen is not implemented. |
-| Clipboard | Bidirectional Unicode text over `cliprdr`, explicit browser clipboard actions, format negotiation, stale-response handling, resource limits. No images or file clipboard. |
+| Clipboard | Unicode text and opt-in HTML/PNG/DIB/DIBV5 over `cliprdr`; explicit OS clipboard actions, serialized requests, ownership generations and bounded snapshots. No file streaming. |
 | Display control | Reliable dynamic channels and one-primary-monitor resize through the display-control channel and server reactivation. No multi-monitor layout. |
 | Diagnostics | Measured packet/byte/bitmap counters, renderer submission cost, presented-frame rate, optional GPU timestamps when available, bridge-only RTT, downloadable reports. |
 
-Audio, microphones, webcams, drive/USB/printer/smart-card redirection, RemoteApp, gateways, UDP/multitransport, advanced graphics codecs, general drawing orders, and full licensing are **not implemented**. The complete distinctions are in [PROTOCOL_MATRIX.md](docs/PROTOCOL_MATRIX.md).
+Audio, microphones, webcams, drive/USB/printer/smart-card redirection, RemoteApp, Microsoft RD Gateway, UDP/multitransport, advanced graphics codecs, general drawing orders, and full licensing are **not implemented**. The complete distinctions are in [PROTOCOL_MATRIX.md](docs/PROTOCOL_MATRIX.md).
 
 ## Architecture
 
@@ -121,16 +146,21 @@ python tools/browser-render-tests.py
 
 Use `CHROMIUM` to select an installed Chromium executable and `LRDP_TEST_ORIGIN` to change the test origin. Renderer tests fail on unavailable backends by default; `--allow-unavailable` explicitly permits reporting an unavailable GPU backend without calling it a pass. It never suppresses incorrect pixels or shader/runtime failures. See [TESTING.md](docs/TESTING.md).
 
-### Evidence shipped with this version
+### Current validation evidence
 
-The `test-results/` directory contains the captured output, not a badge standing in for a qualification program:
+GitHub Actions validates the exact source revision. The `verified-source`
+artifact contains its source archive, revision, SHA-256 checksums, Node test
+log and deterministic protocol-fuzz log. Browser CI exercises the static
+`/RDP/` subpath, separate-origin WebSocket/TCP/TLS/NLA gateway, maximum-size
+Canvas cursors and explicit rich clipboard transfers. See the workflow run
+for the specific commit rather than an old test count or screenshot.
 
-- **81 Node tests passed**, including real TCP/TLS and CredSSP exchanges against an independently structured but co-developed local fixture, certificate rejection, wrong-binding rejection, packet parsing, virtual channels and WebSocket behavior.
-- **100,000 deterministic malformed-input cases**, with zero unexpected exceptions under the smoke-fuzzer's classifier. This is not coverage-guided fuzzing or a security audit.
-- **Canvas pixel comparison: 40,960 pixels, zero differences**, including zero classic-cursor comparison differences for the fixture. GUI smoke tests exercised activation, Unicode sending, clipboard sending, resize to 800×600, profile saving, and desktop/mobile layout, with no uncaught page errors.
-- **WebGPU and WebGL2 execution unverified:** the test browser returned no WebGPU adapter and no WebGL2 context. Code exists, but physical GPU correctness/performance is not established.
-
-Tests against a server written alongside the client can share mistakes. They are not independent Windows or third-party implementation conformance evidence. The benchmark JSON contains local CPU microbenchmarks only, not remote latency, desktop FPS, or GPU throughput claims.
+The repository does not ship the original baseline's historical screenshots
+or test reports. Passing co-developed peer fixtures is not independent Windows
+interoperability, exhaustive conformance, a security audit, or physical GPU
+qualification. Browser CI uses controlled clipboard permissions and loopback
+origins; production HTTPS-to-local-network policy still depends on the user's
+browser and certificate/permission configuration.
 
 ## Source organization
 

@@ -51,3 +51,16 @@ WebSocket -> TCP -> TLS/CredSSP -> activated RDP fixture. The peer fixture is
 co-developed with the client; independent Windows interoperability is not
 established by those tests. Browser cross-origin policy is separately tested
 when a browser is available.
+
+## Large transfers and backpressure
+
+The browser negotiates optional `inputFlowControl: true`. The ready message
+then grants a 256 KiB input window. Binary bytes consume that window and the
+gateway returns `input-ack` credits only after their TCP/TLS write callbacks.
+This acknowledges transport consumption, not remote RDP application execution.
+The browser owns a bounded 32 MiB outbound queue, sends bounded bursts, checks
+native WebSocket bufferedAmount and fails a stalled queue after 30 seconds.
+Disconnect cancels timers and clears queued binary data. The existing reverse
+direction receive-credit flow remains independent. Legacy clients can still
+use the previous bounded-write mode; use the matching updated gateway for
+large clipboard transfers. Gateway source is never included in Pages assets.
