@@ -1,13 +1,17 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { requireThat } from '../../packages/binary/ProtocolError.js';
+import { GatewayLicensing, GATEWAY_LICENSING } from '../../packages/licensing/GatewayLicensing.js';
+import { licenseNamespace } from '../gateway/LicenseStore.js';
+import { writeSocket } from '../../packages/transport/SocketReader.js';
 import { openRdpConnection } from '../../packages/transport/RdpConnection.js';
 const digest = value => createHash('sha256').update(value).digest();
 export const tokenMatches = (input, token) => typeof input === 'string' && input.length >= 24 && input.length <= 512 && timingSafeEqual(digest(input), digest(token));
 export class BridgeSession {
-    constructor(peer, { token, targets, onClose = () => { } }) {
+    constructor(peer, { token, targets, licenseStore, onClose = () => { } }) {
         this.peer = peer;
         this.token = token;
         this.targets = targets;
+        this.licenseStore = licenseStore;
         this.state = 'authentication';
         this.outstanding = 0;
         this.inputOutstanding = this.inputAck = 0;
@@ -38,19 +42,37 @@ export class BridgeSession {
             return;
         if (binary) {
             requireThat(this.state === 'streaming' && value.length > 0 && value.length <= 65536, 'BRIDGE_STATE', 'Binary RDP traffic before security negotiation or packet too large');
-            requireThat(this.remote.writableLength + value.length <= 1024 * 1024, 'BACKPRESSURE', 'Server is not accepting client input');
-            if (this.inputFlowControl) {
-                requireThat(this.inputOutstanding + value.length <= this.inputWindow, 'FLOW_CONTROL', 'Gateway input credit exceeded');
-                this.inputOutstanding += value.length;
-                this.remote.write(value, error => {
+            let packets = [];
+            try {
+                packets = this.licensing.client(value);
+                const total = packets.reduce((sum, packet) => sum + packet.length, 0);
+                requireThat(this.remote.writableLength + total <= 1024 * 1024, 'BACKPRESSURE', 'Server is not accepting client input');
+                if (this.inputFlowControl) {
+                    requireThat(this.inputOutstanding + value.length <= this.inputWindow, 'FLOW_CONTROL', 'Gateway input credit exceeded');
+                    this.inputOutstanding += value.length;
+                }
+                const acceptedBytes = value.length;
+                let remaining = packets.length;
+                const acknowledge = error => {
                     if (this.closed) return;
                     if (error) { this.fail('REMOTE_IO', error.message); return; }
-                    this.inputOutstanding -= value.length;
-                    this.inputAck += value.length;
-                    if (this.inputAck >= 64 * 1024) this.flushInputAck();
-                    else if (!this.inputAckTimer) this.inputAckTimer = setTimeout(() => this.flushInputAck(), 2);
+                    if (this.inputFlowControl) {
+                        this.inputOutstanding -= acceptedBytes;
+                        this.inputAck += acceptedBytes;
+                        if (this.inputAck >= 64 * 1024) this.flushInputAck();
+                        else if (!this.inputAckTimer) this.inputAckTimer = setTimeout(() => this.flushInputAck(), 2);
+                    }
+                };
+                if (!remaining) acknowledge(); // Partial input is owned by a bounded framing queue.
+                for (const packet of packets) this.remote.write(packet, error => {
+                    packet.fill(0);
+                    if (error) acknowledge(error);
+                    else if (--remaining === 0) acknowledge();
                 });
-            } else this.remote.write(value);
+            } catch (error) {
+                // Closing the socket cancels outstanding writes before cleanup.
+                this.remote.destroy(); for (const packet of packets) packet.fill(0); throw error;
+            } finally { value.fill(0); }
             return;
         }
         requireThat(value.length <= 16384, 'CONTROL_LIMIT', 'Bridge control message exceeds limit');
@@ -80,8 +102,7 @@ export class BridgeSession {
         if (control.type === 'ack') {
             requireThat(this.state === 'streaming' && Number.isSafeInteger(control.bytes) && control.bytes > 0 && control.bytes <= this.outstanding, 'FLOW_CONTROL', 'Invalid receive-credit acknowledgement');
             this.outstanding -= control.bytes;
-            if (this.outstanding < this.window / 2)
-                this.remote.resume();
+            if (this.outstanding < this.window / 2) this.resumeRemote();
             return;
         }
         if (control.type === 'ping') {
@@ -100,24 +121,28 @@ export class BridgeSession {
             }
             this.remote = connection.socket;
             this.state = 'streaming';
-            this.peer.sendJSON({ type: 'ready', inputWindow: this.inputFlowControl ? this.inputWindow : 0, ...connection.negotiation, certificate: connection.certificate, authentication: connection.authentication });
+            this.licensing = new GatewayLicensing({ requestedProtocols: connection.negotiation.requestedProtocols,
+                store: this.licenseStore, namespace: licenseNamespace(target, credentials),
+                username: target.licenseUsername ?? credentials.username,
+                write: bytes => {
+                    requireThat(!this.closed && this.remote.writableLength + bytes.length <= 1024 * 1024, 'BACKPRESSURE', 'Server is not accepting licensing data');
+                    return writeSocket(this.remote, bytes);
+                },
+                forward: bytes => this.forward(bytes), notify: message => this.peer.sendJSON(message),
+                pause: () => this.remote.pause(), resume: () => this.resumeRemote(),
+                fail: error => this.fail(error.code || 'LICENSING_FAILED', error.message) });
+            this.peer.sendJSON({ type: 'ready', licensing: GATEWAY_LICENSING, inputWindow: this.inputFlowControl ? this.inputWindow : 0, ...connection.negotiation, certificate: connection.certificate, authentication: connection.authentication });
             const receive = bytes => {
-                if (this.closed)
-                    return;
-                this.outstanding += bytes.length;
-                this.peer.sendBinary(bytes);
-                if (this.outstanding >= this.window)
-                    this.remote.pause();
-                if (this.outstanding > this.window + 1024 * 1024)
-                    this.fail('FLOW_CONTROL', 'Receive credit exceeded');
+                if (this.closed) return;
+                try { this.licensing.server(bytes); }
+                catch (error) { this.fail(error.code || 'LICENSING_FAILED', error.message); }
             };
             this.remote.on('data', receive);
             this.remote.once('error', error => this.fail('REMOTE_IO', error.message));
             this.remote.once('end', () => this.fail('REMOTE_CLOSED', 'Remote RDP server closed the connection'));
             if (connection.pending.length)
                 receive(connection.pending);
-            if (this.outstanding < this.window)
-                this.remote.resume();
+            this.resumeRemote();
         }
         catch (error) {
             this.fail(error.code || 'CONNECTION_FAILED', error.message);
@@ -127,6 +152,16 @@ export class BridgeSession {
             clearTimeout(timeout);
         }
     }
+    resumeRemote() {
+        if (!this.closed && this.outstanding < this.window && !this.licensing?.busy) this.remote?.resume();
+    }
+    forward(bytes) {
+        if (this.closed) return;
+        this.outstanding += bytes.length;
+        requireThat(this.outstanding <= this.window + 1024 * 1024, 'FLOW_CONTROL', 'Receive credit exceeded');
+        this.peer.sendBinary(bytes);
+        if (this.outstanding >= this.window) this.remote.pause();
+    }
     flushInputAck() {
         clearTimeout(this.inputAckTimer); this.inputAckTimer = null;
         if (!this.closed && this.inputAck) {
@@ -135,11 +170,12 @@ export class BridgeSession {
         }
     }
     fail(code, message) {
-        if (!this.closed) {
+        if (this.closed) return;
+        try {
             this.peer.sendJSON({ type: 'error', code, message: String(message).slice(0, 512) });
             this.peer.close(1008, String(code).slice(0, 80));
-            this.close();
-        }
+        } catch { /* The transport may already have failed. */ }
+        finally { this.close(); }
     }
     close() {
         if (this.closed)
@@ -147,6 +183,7 @@ export class BridgeSession {
         this.closed = true;
         this.state = 'closed';
         this.token = null;
+        this.licensing?.close(); this.licenseStore = null;
         clearTimeout(this.authTimer);
         clearTimeout(this.inputAckTimer);
         this.inputAck = this.inputOutstanding = 0;

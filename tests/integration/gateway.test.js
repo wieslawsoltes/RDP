@@ -54,6 +54,7 @@ for (const nla of [false, true]) test(`Pages-origin WebSocket → gateway → TC
     session.start();
     while (session.state !== 'active') {
         const value = await ws.receive();
+            if (value.type === 'licensing') { session.licensingResult(value); continue; }
         assert.ok(value instanceof Uint8Array, JSON.stringify(value));
         session.receive(value);
         ws.send({ type: 'ack', bytes: value.length });

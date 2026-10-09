@@ -26,6 +26,8 @@ export class Session {
         this.options = { width: 1280, height: 800, bpp: 24, clipboard: true, resize: true, selectedProtocol: 2, requestedProtocols: 2, ...options };
         this.options.audio = this.options.audio === true;
         this.state = 'new';
+        this.licensingComplete = false;
+        this.gatewayLicensing = this.options.licensing === 'gateway-v1';
         this.channels = [...(this.options.clipboard ? ['cliprdr'] : []), ...(this.options.resize ? ['drdynvc'] : []), ...(this.options.audio ? ['rdpsnd'] : [])];
         this.framer = new Framer((packet, kind) => this.packet(packet, kind));
         this.bulk = this.options.compression === false ? null : new MppcDecoder();
@@ -89,11 +91,13 @@ export class Session {
         }
         const { channelId, data } = Mcs.parseSendData(bytes);
         if (channelId !== this.ioChannel) {
+            requireThat(this.licensingComplete, 'LICENSE_INCOMPLETE', 'Channel data before licensing completed');
             this.staticChannels.receive(channelId, data);
             return;
         }
         // Enhanced RDP security retains a Basic Security Header on licensing packets only.
-        if (data.length >= 4 && (data[0] | data[1] << 8) === 0x80 && data[2] === 0 && data[3] === 0) {
+        if (data.length >= 4 && ((data[0] | data[1] << 8) & 0x80) && data[2] === 0 && data[3] === 0) {
+            requireThat(((data[0] | data[1] << 8) & ~0x2b0) === 0, 'LICENSE_SECURITY', 'Unsupported licensing security flags');
             this.license(data.subarray(4));
             return;
         }
@@ -130,18 +134,30 @@ export class Session {
         info.fill(0);
         this.options.password = '';
     }
+    licensingResult(control) {
+        requireThat(this.gatewayLicensing && this.state === 'licensing' && !this.licensingComplete, 'LICENSE_STATE', 'Unexpected gateway licensing result');
+        const complete = ['valid-client', 'license-issued', 'license-upgraded'];
+        const pending = ['requesting-license', 'cached-license', 'challenge-verified', 'reset', 'resent'];
+        requireThat(control && typeof control.complete === 'boolean' &&
+            (control.complete ? complete : pending).includes(control.status), 'LICENSE_RESULT', 'Invalid gateway licensing result');
+        this.licensingComplete = control.complete;
+        this.emit({ type: 'licensing', status: control.status, complete: control.complete });
+    }
     license(bytes) {
+        requireThat(!this.gatewayLicensing && this.state === 'licensing' && !this.licensingComplete, 'LICENSE_STATE', 'Unexpected direct licensing PDU');
         const r = new Reader(bytes), type = r.u8(), version = r.u8(), size = r.u16le();
         requireThat(size === bytes.length && (version & 15) >= 2 && (version & 15) <= 3, 'LICENSE_HEADER', 'Invalid licensing header');
         if (type !== 0xff)
-            throw new ProtocolError('LICENSE_PROFILE', 'This build handles valid-client licensing only; new RDS CAL issuance and license storage are not implemented');
+            throw new ProtocolError('LICENSE_PROFILE', 'This direct transport handles valid-client alerts only; use the current local gateway for CAL issuance and persistence');
         const code = r.u32le(), transition = r.u32le(), blobType = r.u16le(), blob = r.take(r.u16le());
         r.end();
         requireThat(code === 7 && transition === 2 && blobType === 4, 'LICENSE_ERROR', `Server licensing error ${code}, transition ${transition}`);
-        this.emit({ type: 'licensing', status: 'valid-client', blobBytes: blob.length });
+        this.licensingComplete = true;
+        this.emit({ type: 'licensing', status: 'valid-client', complete: true, blobBytes: blob.length });
     }
     share(type, source, body) {
         if (type === 1) {
+            requireThat(this.licensingComplete, 'LICENSE_INCOMPLETE', 'Server sent Demand Active before licensing completed');
             requireThat(['licensing', 'active', 'reactivating'].includes(this.state), 'ACTIVATION_STATE', 'Unexpected Demand Active');
             const demand = parseDemandActive(body);
             this.shareId = demand.shareId;

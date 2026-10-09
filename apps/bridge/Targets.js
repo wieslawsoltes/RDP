@@ -1,3 +1,4 @@
+import { encodeLicenseString } from '../../packages/licensing/Messages.js';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { requireThat } from '../../packages/binary/ProtocolError.js';
@@ -24,7 +25,8 @@ export async function loadTargets(file) {
         if (pin)
             requireThat(/^[a-f0-9]{64}$/.test(pin), 'TARGET_CONFIG', 'Certificate pin must be 64 hexadecimal characters');
         requireThat(item.name === undefined || (typeof item.name === 'string' && item.name.length <= 128), 'TARGET_CONFIG', 'Invalid target display name');
-        targets.set(item.id, { id: item.id, name: item.name || item.id, host: item.host, port, serverName: item.serverName, certSha256: pin,
+        if (item.licenseUsername !== undefined) encodeLicenseString(item.licenseUsername).fill(0);
+        targets.set(item.id, { id: item.id, name: item.name || item.id, host: item.host, port, serverName: item.serverName, certSha256: pin, licenseUsername: item.licenseUsername,
             ca: item.caFile ? await readFile(path.resolve(path.dirname(file), item.caFile)) : undefined, allowTlsOnly: item.allowTlsOnly === true });
     }
     return targets;

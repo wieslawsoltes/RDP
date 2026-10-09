@@ -1,11 +1,28 @@
 #!/usr/bin/env node
 import { parseArgs } from 'node:util';
-import { mkdir, readFile, writeFile, stat } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, stat, realpath } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
-import { resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { resolve, sep } from 'node:path';
+import { pathToFileURL, fileURLToPath } from 'node:url';
 import { createBridge } from '../bridge/server.js';
+import { openLicenseStore } from './LicenseStore.js';
 import { loadTargets } from '../bridge/Targets.js';
+
+/** Keep persistent secrets outside every tree served as browser source. */
+export async function privateLicenseDirectory(value) {
+    const directory = resolve(value), root = await realpath(fileURLToPath(new URL('../../', import.meta.url)));
+    const publicRoots = [resolve(root, 'apps/client'), resolve(root, 'packages'), resolve(root, 'dist')];
+    const canonicalCase = path => process.platform === 'win32' ? path.toLowerCase() : path;
+    const check = path => {
+        path = canonicalCase(path);
+        if (publicRoots.map(canonicalCase).some(base => path === base || path.startsWith(base + sep)))
+            throw new Error('License directory must be outside browser/public source and build directories');
+    };
+    check(directory);
+    await mkdir(directory, { recursive: true, mode: 0o700 });
+    check(await realpath(directory));
+    return directory;
+}
 
 export async function runGateway(args = process.argv.slice(2), log = console.log) {
     const { values, positionals } = parseArgs({ args, allowPositionals: true, strict: true, options: {
@@ -15,9 +32,10 @@ export async function runGateway(args = process.argv.slice(2), log = console.log
         host: { type: 'string', default: '127.0.0.1' }, port: { type: 'string', default: '8787' },
         'https-cert': { type: 'string' }, 'https-key': { type: 'string' },
         'public-origin': { type: 'string' }, 'token-file': { type: 'string' },
+        'license-dir': { type: 'string' },
     } });
     if (values.help) {
-        log(`RDP local gateway (Node.js 22+)\n\n  npm run gateway:init\n  npm run gateway -- --allow-origin https://wieslawsoltes.github.io\n\nCommands: init | serve (default)\nOptions: --targets FILE --config-dir DIR --host IP --port PORT\n         --allow-origin EXACT_ORIGIN (repeatable; no wildcards)\n         --https-cert FILE --https-key FILE --public-origin https://localhost:8787\n         --token-file FILE\n\nThe gateway accepts authenticated WebSockets and opens allowlisted RDP TCP/TLS\nconnections. It terminates NLA and handles credentials. It is not an open TCP\nproxy or an implementation of Microsoft's RD Gateway protocol.\n`);
+        log(`RDP local gateway (Node.js 22+)\n\n  npm run gateway:init\n  npm run gateway -- --allow-origin https://wieslawsoltes.github.io\n\nCommands: init | serve (default)\nOptions: --targets FILE --config-dir DIR --host IP --port PORT\n         --allow-origin EXACT_ORIGIN (repeatable; no wildcards)\n         --https-cert FILE --https-key FILE --public-origin https://localhost:8787\n         --token-file FILE --license-dir DIR\n\nThe gateway accepts authenticated WebSockets and opens allowlisted RDP TCP/TLS\nconnections. It terminates NLA and handles credentials. It is not an open TCP\nproxy or an implementation of Microsoft's RD Gateway protocol.\n`);
         return;
     }
     const command = positionals[0] || 'serve', dir = resolve(values['config-dir']);
@@ -41,9 +59,15 @@ export async function runGateway(args = process.argv.slice(2), log = console.log
         token = (await readFile(file, 'utf8')).trim();
     }
     const tlsOptions = values['https-cert'] ? { cert: await readFile(values['https-cert']), key: await readFile(values['https-key']) } : undefined;
-    const bridge = await createBridge({ host: values.host, port, token, targets, tlsOptions,
-        publicOrigin: values['public-origin'], allowedOrigins: values['allow-origin'] });
-    log(`\nRDP LOCAL GATEWAY\nLocal workspace: ${bridge.origin}\nWebSocket: ${bridge.origin.replace(/^http/, 'ws')}/bridge\nTarget configuration: ${file}\nTargets: ${targets.size}\nAllowed external origins: ${values['allow-origin'].join(', ') || '(none)'}\nPrivate access token: ${bridge.token}\n\nPaste the address and token into the browser app and press Load targets.\nNever publish the token or forward the gateway port. Ctrl+C closes sessions.\n`);
+    const licenseDir = await privateLicenseDirectory(values['license-dir'] || resolve(dir, 'licenses'));
+    const licenseStore = await openLicenseStore(licenseDir);
+    let bridge;
+    try { bridge = await createBridge({ host: values.host, port, token, targets, tlsOptions,
+        publicOrigin: values['public-origin'], allowedOrigins: values['allow-origin'], licenseStore }); }
+    catch (error) { await licenseStore.close(); throw error; }
+    const close = bridge.close; let closing;
+    bridge.close = () => closing ||= close().finally(() => licenseStore.close());
+    log(`\nRDP LOCAL GATEWAY\nLocal workspace: ${bridge.origin}\nWebSocket: ${bridge.origin.replace(/^http/, 'ws')}/bridge\nTarget configuration: ${file}\nTargets: ${targets.size}\nPrivate license cache: ${licenseDir}\nAllowed external origins: ${values['allow-origin'].join(', ') || '(none)'}\nPrivate access token: ${bridge.token}\n\nPaste the address and token into the browser app and press Load targets.\nNever publish the token or forward the gateway port. Ctrl+C closes sessions.\n`);
     let stopping = false;
     const stop = async () => { if (!stopping) { stopping = true; await bridge.close(); } };
     for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, stop);

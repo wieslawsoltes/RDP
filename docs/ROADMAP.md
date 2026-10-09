@@ -6,7 +6,7 @@ This is remaining engineering scope, not implemented capability or a promise of 
 
 Run recorded, reproducible tests against independently implemented RDP servers and current Windows client/server editions in an authorized lab. Capture requested/selected capabilities, certificate mode, authentication package and first failing PDU without capturing passwords. Turn every mismatch into a literal-wire regression fixture. Cover domain/local accounts, Unicode names, NLA and explicitly enabled TLS-only, session reactivation, pointer updates, keyboard layouts, clipboard races and slow/fragmented networks.
 
-Implement the full licensing state machine and secure persisted license store; qualify activation/control ordering, server information PDUs and compression negotiation. Do not turn off bounds or certificate checking merely to make a host connect.
+Extend and independently qualify the implemented gateway licensing exchange and encrypted store beyond its current bounded profile; qualify activation/control ordering, server information PDUs and compression negotiation. Do not turn off bounds or certificate checking merely to make a host connect.
 
 ## 2. Renderer and performance qualification
 

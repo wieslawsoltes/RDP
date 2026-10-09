@@ -59,6 +59,7 @@ test('PCM sound survives browser WebSocket gateway, TCP TLS NLA and channel frag
     async function until(predicate) {
         while (!predicate()) {
             const value = await ws.receive();
+            if (value.type === 'licensing') { session.licensingResult(value); continue; }
             if (value instanceof Uint8Array) { session.receive(value); ws.send({ type: 'ack', bytes: value.length }); }
             else if (value.type === 'input-ack') queue.acknowledge(value.bytes);
             else assert.notEqual(value.type, 'error', value.message);

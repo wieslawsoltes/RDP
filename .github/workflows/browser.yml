@@ -34,3 +34,5 @@ jobs:
         run: /tmp/rdp-browser/bin/python tools/browser-audio-tests.py
       - name: Exercise lost gateway probes and explicit fresh-credential reconnection
         run: /tmp/rdp-browser/bin/python tools/browser-recovery-tests.py
+      - name: Exercise authenticated CAL issuance, cache reuse and persistence-gated activation
+        run: /tmp/rdp-browser/bin/python tools/browser-licensing-tests.py

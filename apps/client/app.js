@@ -20,7 +20,7 @@ gatewayInput.addEventListener('input', clearGateway);
 const coverage = [
     ['TCP → X.224 → TLS bridge; certificate validation and allowlisted targets', 'Implemented'],
     ['CredSSP v5/v6 + NTLMv2; server binding verified before delegation', 'Implemented / unaudited'],
-    ['MCS / GCC, activation and valid-client licensing response', 'Implemented subset'],
+    ['MCS / GCC; activation gated on verified gateway licensing', 'Implemented subset'],
     ['Bitmap updates, 8/15/16/24/32-bit raw and 8/15/16/24-bit interleaved RLE', 'Implemented'],
     ['MPPC 8/64 KiB receive compression and bounded 32-bit planar decoding', 'Implemented'],
     ['Local TCP/TLS/NLA gateway and separately hosted static browser app', 'Implemented'],
@@ -29,7 +29,7 @@ const coverage = [
     ['Physical keyboard, Unicode, mouse, wheel; touch/pen mapped to mouse', 'Implemented'],
     ['Unicode, opt-in HTML/PNG/DIB clipboard; multi-monitor display control', 'Implemented'],
     ['Independent Windows / Windows Server interoperability qualification', 'Not completed'],
-    ['Full RDS CAL issuance, persistence, renewal and redirection', 'Not implemented'],
+    ['CAL request/challenge/issuance/upgrade and encrypted gateway cache', 'Implemented / bounded profile'],
     ['GDI orders, RemoteFX, RDPEGFX, AVC420/444', 'Not implemented'],
     ['Kerberos, Remote Credential Guard, RD Gateway and UDP multitransport', 'Not implemented'],
     ['Opt-in PCM audio output over the reliable RDPSND channel', 'Implemented'],

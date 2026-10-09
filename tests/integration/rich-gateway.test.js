@@ -28,6 +28,7 @@ test('Credit-controlled gateway exchanges >2 MiB HTML and images through real TC
     async function until(predicate) {
         while (!predicate()) {
             const value = await ws.receive();
+            if (value.type === 'licensing') { session.licensingResult(value); continue; }
             if (value instanceof Uint8Array) { session.receive(value); ws.send({ type: 'ack', bytes: value.length }); }
             else if (value.type === 'input-ack') { queue.acknowledge(value.bytes); acknowledgements++; }
             else assert.notEqual(value.type, 'error', value.message);

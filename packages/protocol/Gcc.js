@@ -71,7 +71,9 @@ export function parseConferenceResponse(bytes, { requestedProtocols, expectedCha
         else if (type === 0x0c03) {
             result.ioChannel = body.u16le();
             const count = body.u16le();
-            requireThat(count === expectedChannels, 'CHANNEL_COUNT', 'Server static channel count differs from the request');
+            // The gateway observes authenticated server negotiation without parsing client GCC.
+            // Session still supplies expectedChannels and checks exact agreement.
+            requireThat(count <= 16 && (expectedChannels === undefined || count === expectedChannels), 'CHANNEL_COUNT', 'Server static channel count differs from the request or exceeds the limit');
             for (let i = 0; i < count; i++)
                 result.channels.push(body.u16le());
             if (count % 2)
