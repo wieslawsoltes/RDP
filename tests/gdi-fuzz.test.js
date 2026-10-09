@@ -4,6 +4,7 @@ import { GdiOrders } from '../packages/render/gdi/Orders.js';
 import { Reader } from '../packages/binary/Reader.js';
 import { ProtocolError } from '../packages/binary/ProtocolError.js';
 import { concat } from '../packages/binary/Writer.js';
+import { multi } from './fixtures/MultiGdiWire.js';
 import * as W from './fixtures/GdiWire.js';
 
 test('GDI 100000 bounded random and mutated stateful order streams fail only with controlled protocol errors', t => {
@@ -18,6 +19,8 @@ test('GDI 100000 bounded random and mutated stateful order streams fail only wit
         W.createOffscreen(1, 2, 2), W.switchSurface(65535),
         Uint8Array.of(0x41), Uint8Array.of(0x19, 10, 3, 1, 255),
     ];
+    for (const type of [15,16,17,18]) cases.push(multi(type, {x:0,y:0,width:16,height:16},
+        [{x:1,y:1,width:4,height:4},{x:3,y:3,width:6,height:6}]));
     let accepted = 0, rejected = 0;
     for (let i = 0; i < 100000; i++) {
         const revision = (i & 1) + 1, g = new GdiOrders({ width: 16, height: 16, revision, maxWork: 16384 });

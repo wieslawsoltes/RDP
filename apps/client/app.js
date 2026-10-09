@@ -31,7 +31,7 @@ const coverage = [
     ['Independent Windows / Windows Server interoperability qualification', 'Not completed'],
     ['CAL request/challenge/issuance/upgrade and encrypted gateway cache', 'Implemented / bounded profile'],
     ['Opt-in NSCodec surface graphics, GPU plane conversion and presentation-gated frame ACKs', 'Implemented'],
-    ['Opt-in GDI blits, Revision 1/2 bitmap/color caches and offscreen surfaces (24/32-bit)', 'Implemented'],
+    ['Opt-in single/multi-rectangle GDI blits, Revision 1/2 bitmap/color caches and offscreen surfaces (24/32-bit)', 'Implemented'],
     ['Remaining GDI geometry/text orders, RemoteFX, RDPEGFX, AVC420/444', 'Not implemented'],
     ['Kerberos, Remote Credential Guard, RD Gateway and UDP multitransport', 'Not implemented'],
     ['Opt-in PCM audio output over the reliable RDPSND channel', 'Implemented'],

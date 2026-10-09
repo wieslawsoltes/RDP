@@ -11,7 +11,8 @@ export function clientCapabilities({ width, height, bpp = 24, keyboardLayout = 0
     const bitmap = new Writer().u16le(bpp).u16le(1).u16le(1).u16le(1).u16le(width).u16le(height)
         .u16le(0).u16le(1).u16le(1).u8(0).u8(bpp === 32 ? 8 : 0).u16le(1).u16le(0).finish();
     const gdi = orders === true && [24, 32].includes(bpp);
-    const support = new Uint8Array(32); if (gdi) support.fill(1, 0, 5);
+    const support = new Uint8Array(32);
+    if (gdi) { support.fill(1, 0, 5); support.fill(1, 15, 19); }
     const order = new Writer().zeros(16).u32le(0).u16le(1).u16le(20).u16le(0).u16le(1).u16le(0).u16le(gdi ? 0x4a : 0x0a)
         .put(support).u16le(0).u16le(0).u32le(0).u32le(0).u16le(0).u16le(0).u16le(0).u16le(0).finish();
     const input = new Writer().u16le(0x15).u16le(0).u32le(keyboardLayout).u32le(4).u32le(0).u32le(12).zeros(64).finish();

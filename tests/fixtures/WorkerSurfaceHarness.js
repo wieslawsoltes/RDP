@@ -1,6 +1,7 @@
 import { parentPort } from 'node:worker_threads';
 import { LoopbackServer } from '../../packages/lab/LoopbackServer.js';
 import { configureSurfacePeer,surfaceBits,surfaceMarker,sampleNsc } from './SurfacePeer.js';
+import { multi } from './MultiGdiWire.js';
 import { scr,slowOrders } from './GdiWire.js';
 import { toRgba } from '../../packages/codecs/Pixels.js';
 import { concat } from '../../packages/binary/Writer.js';
@@ -44,6 +45,8 @@ parentPort.on('message',command=>{serial=serial.then(async()=>{
         else if(op==='end')peer.surface(surfaceMarker(1,value));
         else if(op==='frame')peer.surface(concat(surfaceMarker(0,value),surfaceBits({width:71,height:15,data:sampleNsc({width:71,height:15})}),surfaceMarker(1,value)));
         else if(op==='copy')peer.data(2,slowOrders(scr(100,100,7,5,0xcc,0,0)));
+        else if(op==='multi-copy')peer.data(2,slowOrders(multi(17,{x:100,y:100,width:7,height:5},
+            [{x:103,y:100,width:4,height:5},{x:100,y:100,width:4,height:5}],{sx:0,sy:0})));
         else if(op==='hold')autoReceipt=!value;
         else if(op==='receipt')dispatch({type:'frame-ack',id:value});
         else if(op==='reactivate')peer.reactivateSurface();

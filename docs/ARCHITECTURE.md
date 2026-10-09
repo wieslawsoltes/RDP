@@ -16,7 +16,7 @@ Any nonterminal state → failed / closed
 
 `Session.receive()` feeds `Framer`, which distinguishes TPKT from fast-path output and preserves stream boundaries across arbitrary socket reads. Slow-path payloads pass through X.224 and MCS before Share Control/Data or static-channel dispatch. A protocol error terminates the session instead of guessing how to recover after stream desynchronization.
 
-Desktop dimensions become authoritative only after Demand Active / reactivation. A display-control request does not merely resize a local canvas. The server must confirm the new desktop through the session protocol. Capability negotiation selects the implemented bitmap profile by default. Explicit GDI opt-in at matching 24/32-bit depth adds six blit orders, Revision 1/2 caches and offscreen support only. The separate surface-graphics opt-in negotiates raw/NSCodec surface commands and frame acknowledgements. RDPGFX/video codecs, glyphs and geometric orders remain unadvertised. Device support is limited to the separately documented channel families. MPPC 8/64 KiB receive compression and bounded planar bitmap support are implemented.
+Desktop dimensions become authoritative only after Demand Active / reactivation. A display-control request does not merely resize a local canvas. The server must confirm the new desktop through the session protocol. Capability negotiation selects the implemented bitmap profile by default. Explicit GDI opt-in at matching 24/32-bit depth adds six single-rectangle and four multi-rectangle blit orders, Revision 1/2 caches and offscreen support only. The separate surface-graphics opt-in negotiates raw/NSCodec surface commands and frame acknowledgements. RDPGFX/video codecs, glyphs and geometric orders remain unadvertised. Device support is limited to the separately documented channel families. MPPC 8/64 KiB receive compression and bounded planar bitmap support are implemented.
 
 `Session` requires already verified security establishment. Its default protocol selection is not proof that a socket was authenticated; transport adapters must perform the handshake and pass the actual requested/selected protocol values. `RdpConnection` is the provided implementation of that precondition.
 
@@ -129,3 +129,9 @@ export function createProtocolClient(transport, negotiated, onEvent) {
 The snippet describes an adapter contract, not a browser raw-TCP API. `apps/client/session-worker.js` is the complete provided adapter. The event stream includes state, desktop, bitmaps, palette, pointer, clipboard, display and error events. Input is represented by typed-discriminator objects (`key`, `unicode`, `mouse`, `mousex`, `sync`) and encoded only when the active session permits it.
 
 To add a protocol family, implement its parser/encoder independently, establish resource and lifecycle invariants, add literal-wire fixtures and an independent-server test, and only then advertise the associated capability. Rendering a local control is not a substitute for the corresponding virtual-channel implementation.
+
+Multi-orders build disjoint scan bands for the intersection of the base, common
+bounds and clipping region. Same-surface source pieces are captured before any
+region writes, avoiding GPU readback and cross-piece overwrite dependencies.
+Only visible disjoint pixels are copied; both copying and rasterization consume
+the update work budget. Retained region data is cleared on replacement/close.

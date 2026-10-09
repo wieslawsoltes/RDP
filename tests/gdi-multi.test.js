@@ -150,3 +150,34 @@ test('GDI multi clipping union matches a per-pixel oracle for 1000 deterministic
         for(let y=0;y<32;y++)for(let x=0;x<32;x++)assert.equal(counts[y*32+x],Number(x>=4&&x<=26&&y>=5&&y<=24&&rs.some(r=>inRect(r,x,y))));
     }
 });
+
+test('GDI multi orders evaluate every legal ROP against independent bit-by-bit pixel semantics', () => {
+    const bit = (code,d,s,p) => { let value=0; for(let b=0;b<24;b++) value|=((code>>>(((p>>>b&1)<<2)|((s>>>b&1)<<1)|(d>>>b&1)))&1)<<b;return value; };
+    const depends = (code, operand) => Array.from({length:8},(_,i)=>i).some(i=>(code>>i&1)!==(code>>(i^operand)&1));
+    const base=rect(2,2,6,6), rs=[rect(2,2,4,4),rect(4,4,4,4)];
+    for(const type of [15,16,17]) for(let code=0;code<256;code++) {
+        if ((type!==17 && depends(code,2)) || (type!==16 && depends(code,4))) continue;
+        const g=engine(); for(let i=0;i<g.screen.pixels.length;i++)g.screen.pixels[i]=(i*0x142857)&0xffffff;
+        const before=g.screen.pixels.slice(); run(g,multi(type,base,rs,{code,fore:0x815723,sx:1,sy:1}));
+        for(let y=0;y<32;y++)for(let x=0;x<32;x++)assert.equal(pixel(g,x,y),
+            rs.some(r=>inRect(r,x,y))?bit(code,before[y*32+x],type===17?before[(y-1)*32+x-1]:0,type===16?0x815723:0):before[y*32+x]);
+        g.close();
+    }
+});
+test('GDI multi maximum 383-byte list decodes 45 fully encoded rectangles without allocation growth', () => {
+    const w=new Writer().zeros(23), rs=[];
+    for(let i=0;i<45;i++) {
+        const x=i%2?0:16383, delta=i===0?16383:i%2?-16383:16383;
+        for(const n of [delta,delta,16383,16383])w.u8(0x80|(n>>8&127)).u8(n&255);
+        rs.push(rect(x,x,16383,16383));
+    }
+    const encoded=w.finish();assert.equal(encoded.length,383);assert.deepEqual(decodeDeltaRectangles(encoded,45),rs);
+});
+test('GDI retained multi region rejects count growth beyond available entries and clears snapshots on source error', () => {
+    const g=engine();run(g,multi(15,rect(0,0,8,8),[rect(1,1,1,1)]));
+    const old=g.fields.get(15).rectangles;
+    assert.throws(()=>run(g,Uint8Array.of(1,0x20,2)),ProtocolError);assert.ok(old.every(r=>Object.values(r).every(v=>v===0)));
+    const h=engine();const shadow=h.screen.pixels;
+    assert.throws(()=>run(h,multi(17,rect(0,0,32,32),[rect(0,0,1,1),rect(31,31,1,1)],{sx:1,sy:1})),ProtocolError);
+    assert.ok(shadow.every(v=>v===0));assert.equal(h.dirty.take({width:0,height:0,pixels:new Uint32Array()}).length,0);
+});
