@@ -141,6 +141,7 @@ test('32-bit profiles request the correct GCC flag with a 24-bit fallback field'
 test('Requested 32-bit session respects a server 24-bit fallback during activation', () => {
     const client = new Session({ options: { bpp: 32 }, send: () => {} });
     client.state = 'licensing'; client.userId = 1001; client.ioChannel = 1003;
+    client.license(new Writer().u8(0xff).u8(3).u16le(16).u32le(7).u32le(2).u16le(4).u16le(0).finish());
     const caps = clientCapabilities({ width: 800, height: 600, bpp: 24 }), all = concat(...caps);
     const demand = new Writer().u32le(123).u16le(0).u16le(all.length + 4).u16le(caps.length).u16le(0).put(all).u32le(0).finish();
     client.share(1, 1002, demand);

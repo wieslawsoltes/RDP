@@ -8,11 +8,12 @@ import { fileURLToPath } from 'node:url';
 import { WebSocketPeer } from '../../packages/transport/WebSocketPeer.js';
 import { requireThat } from '../../packages/binary/ProtocolError.js';
 import { normalizeOrigin, applyCors } from '../gateway/OriginPolicy.js';
+import { MemoryLicenseStore } from '../gateway/LicenseStore.js';
 import { loadTargets } from './Targets.js';
 import { BridgeSession, tokenMatches } from './BridgeSession.js';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const mime = new Map([['.html', 'text/html; charset=utf-8'], ['.js', 'text/javascript; charset=utf-8'], ['.css', 'text/css; charset=utf-8'], ['.json', 'application/json'], ['.svg', 'image/svg+xml'], ['.png', 'image/png'], ['.ico', 'image/x-icon'], ['.wgsl', 'text/plain; charset=utf-8']]);
-export async function createBridge({ token = randomBytes(32).toString('hex'), targets = new Map(), host = '127.0.0.1', port = 8787, tlsOptions, publicOrigin, allowedOrigins = [] } = {}) {
+export async function createBridge({ token = randomBytes(32).toString('hex'), targets = new Map(), host = '127.0.0.1', port = 8787, tlsOptions, publicOrigin, allowedOrigins = [], licenseStore } = {}) {
     requireThat(typeof token === 'string' && token.length >= 24 && token.length <= 512, 'TOKEN_POLICY', 'Bridge token must have at least 24 characters');
     requireThat(tlsOptions || ['127.0.0.1', '::1', 'localhost'].includes(host), 'LISTEN_POLICY', 'Non-loopback listeners require HTTPS certificates');
     requireThat(!tlsOptions || publicOrigin, 'ORIGIN_POLICY', 'HTTPS requires LRDP_PUBLIC_ORIGIN with the exact externally used origin');
@@ -22,6 +23,10 @@ export async function createBridge({ token = randomBytes(32).toString('hex'), ta
     }
     requireThat(Array.isArray(allowedOrigins) && allowedOrigins.length <= 32, 'ORIGIN_POLICY', 'At most 32 explicitly allowed browser origins');
     const origins = new Set(allowedOrigins.map(normalizeOrigin));
+    const ownedStore = licenseStore === undefined;
+    licenseStore ??= new MemoryLicenseStore();
+    for (const method of ['hardwareId', 'machineName', 'find', 'save'])
+        requireThat(typeof licenseStore[method] === 'function', 'LICENSE_STORE', 'Invalid licensing store adapter');
     let origin;
     const sessions = new Set(), sockets = new Set(), rates = new Map();
     const handler = async (req, res) => {
@@ -117,7 +122,7 @@ export async function createBridge({ token = randomBytes(32).toString('hex'), ta
             }
             requireThat(++rate.count <= 24 && sessions.size < 16, 'RATE_LIMIT', 'Connection limit exceeded');
             const peer = WebSocketPeer.accept(req, socket);
-            const session = new BridgeSession(peer, { token, targets, onClose: () => sessions.delete(session) });
+            const session = new BridgeSession(peer, { token, targets, licenseStore, onClose: () => sessions.delete(session) });
             sessions.add(session);
             if (head.length)
                 peer.receive(head);
@@ -126,17 +131,20 @@ export async function createBridge({ token = randomBytes(32).toString('hex'), ta
             socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\nContent-Length: 0\r\n\r\n');
         }
     });
-    await new Promise((resolve, reject) => { server.once('error', reject); server.listen(port, host, resolve); });
+    try { await new Promise((resolve, reject) => { server.once('error', reject); server.listen(port, host, resolve); }); }
+    catch (error) { if (ownedStore) await licenseStore.close(); throw error; }
     const address = server.address(), hostText = host.includes(':') ? `[${host}]` : host;
     origin = publicOrigin || `${tlsOptions ? 'https' : 'http'}://${hostText}:${address.port}`;
     origins.add(origin);
-    return { server, token, origin, address, close: async () => {
+    let closing;
+    return { server, token, origin, address, close: () => closing ||= (async () => {
             for (const session of sessions)
                 session.close();
             for (const socket of sockets)
                 socket.destroy();
             await new Promise(resolve => server.close(resolve));
-        } };
+            if (ownedStore) await licenseStore.close();
+        })() };
 }
 async function main() {
     const targets = await loadTargets(process.env.LRDP_TARGETS || path.join(root, 'targets.json'));

@@ -191,6 +191,10 @@ function start(message) {
                     openSession({ ...options, password: options.security === 'tls' ? credentials.password : '' }, control);
                     clearSecrets();
                 }
+                else if (control.type === 'licensing') {
+                    if (!session) throw new Error('Licensing result before gateway initialization');
+                    session.licensingResult(control);
+                }
                 else if (control.type === 'input-ack') {
                     if (!outbound) throw new Error('Input acknowledgement before gateway initialization');
                     outbound.acknowledge(control.bytes);
