@@ -30,3 +30,5 @@ jobs:
         run: /tmp/rdp-browser/bin/python tools/browser-pointer-tests.py
       - name: Exercise OS clipboard, browser controls, worker transfers and CLIPRDR over TLS/NLA
         run: /tmp/rdp-browser/bin/python tools/browser-clipboard-tests.py
+      - name: Exercise opt-in PCM playback, mute, worker transfers and RDPSND through TLS/NLA
+        run: /tmp/rdp-browser/bin/python tools/browser-audio-tests.py
