@@ -21,7 +21,7 @@ export class AudioInputChannel {
         this.send = send; this.emit = emit; this.nextRequest = nextRequest; this.canSend = canSend;
         this.state = 'version'; this.formats = []; this.requestId = this.captureId = 0;
         this.rejected = this.sentPackets = this.sentBytes = this.droppedChunks = 0;
-        this.encoder = null;
+        this.encoder = null; this.lastCaptureId = 0;
     }
     receive(bytes) {
         if (this.state === 'closed') return;
@@ -86,6 +86,8 @@ export class AudioInputChannel {
         if (requestId !== this.requestId || !['pending', 'streaming'].includes(this.state)) return false;
         requireThat(Number.isSafeInteger(captureId) && captureId > 0 && Number.isInteger(result) &&
             (result === 0 || result >= 0x80000000 && result <= 0xffffffff), 'MIC_CAPTURE', 'Invalid capture readiness result');
+        if (captureId <= this.lastCaptureId) return false;
+        this.lastCaptureId = captureId;
         if (this.state === 'pending') {
             this.send(pdu(7, this.index)); this.send(pdu(4, result));
             this.state = result === 0 ? 'streaming' : 'open';

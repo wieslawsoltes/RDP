@@ -14,21 +14,24 @@ import { PointerCache } from './Pointer.js';
 import { parseBitmapUpdate, parsePalette } from './BitmapUpdate.js';
 import { encodeInput, unicodeEvents } from './InputEncoder.js';
 import { StaticChannels } from '../channels/StaticChannels.js';
+import { AudioInputChannel, AUDIO_INPUT_CHANNEL } from '../channels/AudioInputChannel.js';
 import { AudioOutputChannel } from '../channels/AudioOutputChannel.js';
 import { ClipboardChannel } from '../channels/ClipboardChannel.js';
 import { DynamicChannels } from '../channels/DynamicChannels.js';
 import { DisplayControl, DISPLAY_CHANNEL } from '../channels/DisplayControl.js';
 /** Post-TLS client. No transport, DOM, graphics, or platform dependencies. */
 export class Session {
-    constructor({ send, emit = () => { }, options = {} }) {
+    constructor({ send, emit = () => { }, options = {}, canSendAudioInput = () => true }) {
         this.send = send;
         this.emit = emit;
         this.options = { width: 1280, height: 800, bpp: 24, clipboard: true, resize: true, selectedProtocol: 2, requestedProtocols: 2, ...options };
         this.options.audio = this.options.audio === true;
+        this.options.microphone = this.options.microphone === true;
+        this.canSendAudioInput = canSendAudioInput; this.nextMicrophoneRequest = 0;
         this.state = 'new';
         this.licensingComplete = false;
         this.gatewayLicensing = this.options.licensing === 'gateway-v1';
-        this.channels = [...(this.options.clipboard ? ['cliprdr'] : []), ...(this.options.resize ? ['drdynvc'] : []), ...(this.options.audio ? ['rdpsnd'] : [])];
+        this.channels = [...(this.options.clipboard ? ['cliprdr'] : []), ...(this.options.resize || this.options.microphone ? ['drdynvc'] : []), ...(this.options.audio ? ['rdpsnd'] : [])];
         this.framer = new Framer((packet, kind) => this.packet(packet, kind));
         this.bulk = this.options.compression === false ? null : new MppcDecoder();
         this.fastPath = new FastPath((code, bytes) => this.fastUpdate(code, bytes), 16 * 1024 * 1024, this.bulk);
@@ -120,10 +123,18 @@ export class Session {
                 this.staticChannels.register(id, this.audio);
             }
             if (name === 'drdynvc') {
-                const factories = new Map([[DISPLAY_CHANNEL, sendDisplay => {
+                const factories = new Map(this.options.resize ? [[DISPLAY_CHANNEL, sendDisplay => {
                             this.display = new DisplayControl(sendDisplay, value => this.emit({ ...value, kind: value.type, type: 'display' }));
                             return this.display;
-                        }]]);
+                        }]] : []);
+                if (this.options.microphone) factories.set(AUDIO_INPUT_CHANNEL, sendInput => {
+                    if (this.microphone && this.microphone.state !== 'closed') return null;
+                    this.microphone = new AudioInputChannel(sendInput, value => this.emit({ ...value, type: 'microphone' }), {
+                        nextRequest: () => ++this.nextMicrophoneRequest,
+                        canSend: bytes => !this.staticChannels.suspended && this.canSendAudioInput(bytes),
+                    });
+                    return this.microphone;
+                });
                 this.dynamic = new DynamicChannels(send, factories, value => this.emit({ ...value, kind: value.type, type: 'dynamic' }));
                 this.staticChannels.register(id, this.dynamic);
             }
@@ -333,6 +344,12 @@ export class Session {
         for (let i = 0; i < events.length; i += 128)
             this.input(events.slice(i, i + 128));
     }
+    microphoneReady(requestId, captureId, result) {
+        const accepted = this.microphone?.ready(requestId, captureId, result) === true;
+        this.emit({ type: 'microphone', kind: 'ready-result', requestId, captureId, accepted });
+    }
+    microphoneData(value) { return this.state === 'active' && !!this.microphone?.capture(value); }
+    microphoneStop(requestId, captureId) { return this.microphone?.pause(requestId, captureId); }
     consumeAudio(id, disposition) { return this.audio?.consume(id, disposition) || false; }
     setClipboard(text) { requireThat(this.clipboard, 'CLIPBOARD_DISABLED', 'Clipboard was not enabled'); this.clipboard.setText(text); }
     setClipboardContent(content) { requireThat(this.state === 'active' && this.clipboard, 'CLIPBOARD_DISABLED', 'An active clipboard channel is required'); this.clipboard.setContent(content); }
@@ -343,7 +360,7 @@ export class Session {
         if (this.state === 'active')
             this.dataSend(33, new Writer().u8(1).zeros(3).u16le(0).u16le(0).u16le(this.desktop.width - 1).u16le(this.desktop.height - 1).finish());
     }
-    stats() { return { receivedBytes: this.receivedBytes, packets: this.receivedPackets, bitmapBytes: this.bitmapBytes, state: this.state, audio: this.audio?.stats() || null }; }
+    stats() { return { receivedBytes: this.receivedBytes, packets: this.receivedPackets, bitmapBytes: this.bitmapBytes, state: this.state, audio: this.audio?.stats() || null, microphone: this.microphone?.stats() || null }; }
     fail(error) {
         if (this.state === 'failed' || this.state === 'closed')
             return;

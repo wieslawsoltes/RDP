@@ -33,8 +33,9 @@ const coverage = [
     ['GDI orders, RemoteFX, RDPEGFX, AVC420/444', 'Not implemented'],
     ['Kerberos, Remote Credential Guard, RD Gateway and UDP multitransport', 'Not implemented'],
     ['Opt-in PCM audio output over the reliable RDPSND channel', 'Implemented'],
+    ['Explicit-consent PCM microphone over AUDIO_INPUT with bounded AudioWorklet capture', 'Implemented'],
     ['Bounded gateway health probes and explicit fresh-credential reconnection', 'Implemented'],
-    ['Microphone, camera, native touch, USB, smart cards, drives and printers', 'Not implemented'],
+    ['Camera, native touch, USB, smart cards, drives and printers', 'Not implemented'],
     ['Clipboard file streaming, automatic session resumption and RemoteApp', 'Not implemented'],
 ];
 for (const [name, status] of coverage) {
@@ -104,7 +105,7 @@ function reconnectSession(session) {
     $('#form-message').textContent = 'Reconnect with fresh credentials. Verify the gateway address, paste its token, load its targets and enter your password again.';
     gatewayInput.focus();
 }
-function currentProfile() { return sanitizeProfile({ ...Object.fromEntries(new FormData(form)), clipboard: $('#clipboard').checked, richClipboard: $('#rich-clipboard').checked, resize: $('#resize').checked, audio: $('#audio').checked }); }
+function currentProfile() { return sanitizeProfile({ ...Object.fromEntries(new FormData(form)), clipboard: $('#clipboard').checked, richClipboard: $('#rich-clipboard').checked, resize: $('#resize').checked, audio: $('#audio').checked, microphone: $('#microphone').checked }); }
 function fillProfile(profile) {
     showOverview();
     const p = sanitizeProfile(profile);

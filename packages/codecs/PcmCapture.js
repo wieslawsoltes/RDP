@@ -9,6 +9,7 @@ export function supportedCaptureFormat(f) {
 }
 const TAPS = 48, HALF = TAPS / 2, PHASES = 256, MASK = 127;
 const clean = value => Number.isFinite(value) ? Math.max(-1, Math.min(1, value)) : 0;
+const sample = value => { value = clean(value); return Math.round(value < 0 ? value * 32768 : value * 32767); };
 
 /** Windowed-sinc low-pass table. A direct path preserves matching-rate PCM.
  * Tables and bounded histories are per stream; no captured samples are cached.
@@ -73,7 +74,6 @@ export class PcmCapture {
         }
     }
     output(left, right) {
-        const sample = v => { v = clean(v); return Math.round(v < 0 ? v * 32768 : v * 32767); };
         if (this.format.channels === 1) this.view.setInt16(this.at, sample((left + right) * 0.5), true);
         else {
             this.view.setInt16(this.at, sample(left), true);

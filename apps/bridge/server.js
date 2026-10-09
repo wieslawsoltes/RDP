@@ -41,7 +41,7 @@ export async function createBridge({ token = randomBytes(32).toString('hex'), ta
             res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
             res.setHeader('Cross-Origin-Embedder-Policy', 'require-corp');
             res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
-            res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), usb=(), serial=()');
+            res.setHeader('Permissions-Policy', 'camera=(), microphone=(self), geolocation=(), usb=(), serial=()');
             res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; connect-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'");
             res.setHeader('Cache-Control', 'no-store');
             const url = new URL(req.url, origin);
