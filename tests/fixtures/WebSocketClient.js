@@ -27,7 +27,7 @@ export async function websocketClient(origin, clientOrigin, ca) {
             const h = await reader.read(2);
             let length = h[1] & 127;
             if (length === 126) { const b = await reader.read(2); length = b[0] * 256 + b[1]; }
-            if (length === 127) { const b = await reader.read(8); length = Number(new DataView(b.buffer, b.byteOffset, 8).getBigUint64(0)); }
+            else if (length === 127) { const b = await reader.read(8); length = Number(new DataView(b.buffer, b.byteOffset, 8).getBigUint64(0)); }
             if (length > 2 * 1024 * 1024) throw new Error('Fixture frame too large');
             const bytes = new Uint8Array(await reader.read(length));
             if ((h[0] & 15) === 2) return bytes;

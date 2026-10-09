@@ -284,8 +284,10 @@ export class Session {
                 catch (error) { for (const rect of rectangles) if (rect.data.byteLength) rect.data.fill(0); throw error; }
             } else this.emit({ type: 'bitmaps', rectangles });
         }
-        else if (type === 2)
+        else if (type === 2) {
+            requireThat(!this.surface?.current, 'SURFACE_PALETTE', 'Palette changes inside marked surface frames are unsupported');
             this.emit({ type: 'palette', palette: parsePalette(r) });
+        }
         else if (type === 3) {
             r.u16le();
             r.end();

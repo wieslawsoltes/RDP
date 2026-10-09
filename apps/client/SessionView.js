@@ -215,6 +215,13 @@ export class SessionView {
         if (this.state === 'failed' && ['state', 'stage'].includes(value.type))
             return;
         if (value.type === 'frame') {
+            if (['failed', 'closed'].includes(this.state)) {
+                for (const command of value.commands) {
+                    for (const rectangle of command.rectangles || []) if (rectangle.data?.byteLength) rectangle.data.fill(0);
+                    for (const bytes of [command.palette, command.pixels]) if (bytes?.byteLength) bytes.fill(0);
+                }
+                return;
+            }
             this.commands.push(value);
             this.scheduleRender();
             return;
