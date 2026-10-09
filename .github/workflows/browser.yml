@@ -28,3 +28,5 @@ jobs:
         run: /tmp/rdp-browser/bin/python tools/browser-gateway-tests.py
       - name: Compare maximum cursor rendering pixel for pixel in Chromium
         run: /tmp/rdp-browser/bin/python tools/browser-pointer-tests.py
+      - name: Exercise OS clipboard, browser controls, worker transfers and CLIPRDR over TLS/NLA
+        run: /tmp/rdp-browser/bin/python tools/browser-clipboard-tests.py
