@@ -1,3 +1,5 @@
+import { configureSurfacePeer, surfaceBits, surfaceMarker } from './SurfacePeer.js';
+import { concat } from '../../packages/binary/Writer.js';
 import { configureMicrophonePeer } from './MicrophonePeer.js';
 import { configureAudioPeer } from './AudioPeer.js';
 import { configureRichClipboard } from './RichClipboardPeer.js';
@@ -5,6 +7,36 @@ import { makeCertificate, serveRdp } from './NetworkServer.js';
 import { createBridge } from '../../apps/bridge/server.js';
 const cert = await makeCertificate();
 const remote = await serveRdp(cert, { nla: true, configurePeer: peer => {
+    if (process.env.RDP_SURFACE_FIXTURE === '1') {
+        const state = configureSurfacePeer(peer, {
+            onAck: id => console.log('SURFACE_ACK', id),
+            onConfirm: profile => console.log('SURFACE_PROFILE', JSON.stringify(profile)),
+        });
+        const raw = (width, height, color) => {
+            const data = new Uint8Array(width * height * 4);
+            for (let i = 0; i < data.length; i += 4) data.set(color, i);
+            return surfaceBits({ width, height, codec: 0, data });
+        };
+        peer.onActive = () => {
+            peer.surface(raw(16, 16, [1, 2, 3, 255]));
+            peer.surface(concat(surfaceMarker(0, state.confirms * 100 + 1), surfaceBits({x: 4, y: 5})));
+        };
+        const input = peer.onInput;
+        peer.onInput = events => {
+            input(events);
+            for (const e of events) if (e.type === 4 && !(e.flags & 0x8000)) {
+                const base = state.confirms * 100;
+                if (e.a === 0x12) peer.surface(surfaceMarker(1, base + 1)); // e: finish held frame
+                if (e.a === 0x21) peer.surface(concat(surfaceMarker(0, base + 2), surfaceBits({x:4,y:5,bpp:24}),
+                    surfaceBits({type:6,x:6,y:7,width:2,height:2,drawWidth:1,drawHeight:1,codec:0,
+                        data:Uint8Array.from([90,80,70,0,90,80,70,0,90,80,70,0,90,80,70,0]),extra:true}), surfaceMarker(1, base + 2)));
+                if (e.a === 0x26) peer.surface(concat(surfaceMarker(0, base + 3), raw(400,400,[40,50,60,255]), surfaceMarker(1, base + 3)));
+                if (e.a === 0x13) peer.reactivateSurface(); // r
+                if (e.a === 0x2d) peer.surface(surfaceBits({codec:99})); // x: unnegotiated codec
+                if (e.a === 0x30) console.log('SURFACE_BARRIER', JSON.stringify({acks:state.acks,confirms:state.confirms}));
+            }
+        };
+    }
     if (process.env.RDP_MICROPHONE_FIXTURE === '1') {
         let total = 0, openReplies = 0, nonzero = 0;
         const counts = [0, 0], rms = [0, 0];
