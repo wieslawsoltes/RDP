@@ -12,3 +12,4 @@ __pycache__/
 *.pfx
 *.p12
 dist/
+test-results/

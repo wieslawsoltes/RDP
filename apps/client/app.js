@@ -27,7 +27,7 @@ const coverage = [
     ['WebGPU compute conversion, ordered framebuffer writes and cursor composition', 'Implemented'],
     ['WebGL2 and Canvas 2D fallback compositors', 'Implemented'],
     ['Physical keyboard, Unicode, mouse, wheel; touch/pen mapped to mouse', 'Implemented'],
-    ['Unicode clipboard over CLIPRDR; initial/dynamic multi-monitor display control', 'Implemented'],
+    ['Unicode, opt-in HTML/PNG/DIB clipboard; multi-monitor display control', 'Implemented'],
     ['Independent Windows / Windows Server interoperability qualification', 'Not completed'],
     ['Full RDS CAL issuance, persistence, renewal and redirection', 'Not implemented'],
     ['GDI orders, RemoteFX, RDPEGFX, AVC420/444', 'Not implemented'],
@@ -92,7 +92,7 @@ function openSession(mode, options) {
     selectSession(session.id);
     $('#global-status').textContent = `${sessions.size} open session${sessions.size === 1 ? '' : 's'}`;
 }
-function currentProfile() { return sanitizeProfile({ ...Object.fromEntries(new FormData(form)), clipboard: $('#clipboard').checked, resize: $('#resize').checked }); }
+function currentProfile() { return sanitizeProfile({ ...Object.fromEntries(new FormData(form)), clipboard: $('#clipboard').checked, richClipboard: $('#rich-clipboard').checked, resize: $('#resize').checked }); }
 function fillProfile(profile) {
     showOverview();
     const p = sanitizeProfile(profile);
@@ -220,7 +220,7 @@ form.onsubmit = event => {
     }
     openSession('remote', { ...profile, gatewayUrl: loadedGateway.websocket });
 };
-function startLab() { openSession('lab', sanitizeProfile({ name: 'Protocol Lab', width: 1280, height: 800, bpp: 24, backend: $('#backend').value, clipboard: true, resize: true })); }
+function startLab() { openSession('lab', sanitizeProfile({ name: 'Protocol Lab', width: 1280, height: 800, bpp: 24, backend: $('#backend').value, clipboard: true, richClipboard: $('#rich-clipboard').checked, resize: true })); }
 $('#start-lab').onclick = startLab;
 $('#lab-nav').onclick = startLab;
 function newConnection() { showOverview(); form.reset(); gatewayInput.value = defaultGateway(location.href, document.documentElement.dataset.hosting === 'static'); clearGateway(); $('#profile-id').value = ''; $('#form-message').textContent = ''; $('#connection-name').focus(); }

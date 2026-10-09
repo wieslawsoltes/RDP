@@ -39,3 +39,22 @@ Primary specifications:
 - https://learn.microsoft.com/en-us/windows/win32/dataxchg/html-clipboard-format
 - https://learn.microsoft.com/en-us/windows/win32/api/wingdi/ns-wingdi-bitmapinfoheader
 - https://learn.microsoft.com/en-us/windows/win32/api/wingdi/ns-wingdi-bitmapv5header
+
+## Browser integration
+
+The optional profile setting exposes explicit read-and-send, fetch-remote and
+copy-received actions. No OS polling or automatic writes occur. HTML is never
+inserted into the app DOM. PNG is converted to DIB alternatives using bounded
+browser image decoding; DIB images convert to PNG for OS clipboard writes.
+Promise-valued ClipboardItems preserve user activation during image encoding.
+Owned image buffers are transferred across the worker boundary. Generation
+changes/disconnect clear main-thread snapshots; a delayed permission result is
+not sent after the session closes or clipboard ownership changes.
+
+New input credits prevent large outgoing clipboard responses from tripping the
+gateway's original 1 MiB write bound. A real TCP/TLS/CredSSP integration test
+exchanges over 2 MiB of HTML and image formats through these credits. Chromium
+CI adds the complete GUI/worker/gateway clipboard roundtrip, exact pixel checks,
+no implicit OS writes, inert HTML, and permission-completion-after-close checks.
+Locally Chromium was blocked by an administrator URL policy; that was not
+bypassed. GitHub's separate browser workflow supplies browser evidence.

@@ -1,3 +1,4 @@
+import { readBrowserClipboard, writeBrowserClipboard, releaseClipboardContent, ClipboardSnapshot } from './BrowserClipboard.js';
 import { normalizeMonitorLayout } from '../../packages/protocol/MonitorLayout.js';
 import { createRenderer } from '../../packages/render/RendererFactory.js';
 import { InputController } from '../../packages/input/InputController.js';
@@ -19,6 +20,8 @@ export class SessionView {
         this.stats = {};
         this.displayReady = false;
         this.closed = false;
+        this.clipboardSnapshot = new ClipboardSnapshot();
+        this.clipboardReading = false;
         this.rendering = false;
         this.tab = element('div', 'session-tab');
         this.tab.append(icon(mode === 'lab' ? 'chip' : 'monitor'));
@@ -154,9 +157,9 @@ export class SessionView {
             },
         });
     }
-    post(value) {
+    post(value, transfer = []) {
         if (!this.closed && this.worker)
-            this.worker.postMessage(value);
+            this.worker.postMessage(value, transfer);
     }
     event(value) {
         if (this.closed)
@@ -176,12 +179,14 @@ export class SessionView {
             this.bridgeRttMs = value.bridgeRttMs;
             return;
         }
-        if (value.type === 'clipboard' && value.kind === 'text') {
-            this.remoteClipboard = value.text;
-            if (this.drawerKind === 'clipboard')
-                this.remoteArea.value = value.text;
-            toast('Remote text clipboard received');
-            return;
+        if (value.type === 'clipboard') {
+            if (this.state === 'failed' || this.state === 'closed') return;
+            if (this.clipboardSnapshot.apply(value)) {
+                this.remoteClipboard = this.clipboardSnapshot.value.text || '';
+                this.updateClipboardControls();
+            }
+            if (['rejected', 'timeout'].includes(value.kind)) toast(value.message);
+            return; // Contents never enter diagnostics or the DOM as markup.
         }
         if (value.type === 'monitor-layout') {
             this.monitorLayout = value;
@@ -208,6 +213,8 @@ export class SessionView {
         }
         if (value.type === 'state' || value.type === 'stage') {
             this.state = value.state;
+            if (value.state === 'closed') this.clipboardSnapshot.clear();
+            this.updateClipboardControls();
             this.stateLabel.textContent = value.state;
             this.overlay.hidden = value.state === 'active';
             this.overlayHeading.textContent = value.state === 'closed' ? 'Session disconnected' : 'Connecting';
@@ -331,7 +338,7 @@ export class SessionView {
         this.drawer.replaceChildren();
         const header = element('div', 'drawer-header'), close = button('', { className: 'icon-button', symbol: 'close', title: 'Close panel' });
         close.onclick = () => { this.drawer.hidden = true; this.drawerKind = null; this.layout(); };
-        header.append(element('h3', '', { display: 'Monitor layout', clipboard: 'Text clipboard', keyboard: 'Keyboard', diagnostics: 'Diagnostics' }[kind]), close);
+        header.append(element('h3', '', { display: 'Monitor layout', clipboard: 'Clipboard', keyboard: 'Keyboard', diagnostics: 'Diagnostics' }[kind]), close);
         this.drawer.append(header);
         if (kind === 'display') {
             this.drawer.append(element('p', '', 'Coordinates are relative to the primary monitor at (0, 0). All monitors share one virtual-desktop canvas. Maximum 16 monitors within an 8192-pixel / 16-megapixel desktop.'));
@@ -400,6 +407,8 @@ export class SessionView {
             const copyActions = element('div', 'actions');
             copyActions.append(copy);
             this.drawer.append(copyActions);
+            if (this.options.richClipboard) this.buildRichClipboard();
+            this.updateClipboardControls();
         }
         else if (kind === 'keyboard') {
             this.drawer.append(element('p', '', 'The canvas sends physical scan codes. Use Unicode input for IME, mobile keyboards or text outside the active remote keyboard layout. Browser-reserved shortcuts may stay local.'));
@@ -433,6 +442,60 @@ export class SessionView {
         }
         this.layout();
     }
+    buildRichClipboard() {
+        this.drawer.append(element('div', 'eyebrow', 'HTML AND IMAGES'));
+        this.drawer.append(element('p', '', 'Read and send shares the supported formats from this device. Fetch reads the remote selection into this session only. Copy writes it to your system clipboard. HTML is never rendered here. Limits: 8 MiB per format, 2 megapixels.'));
+        this.richStatus = element('p', 'fineprint');
+        this.richStatus.setAttribute('role', 'status');
+        this.richStatus.setAttribute('aria-label', 'Rich clipboard status');
+        const read = this.richRead = button('Read and send rich clipboard');
+        read.onclick = async () => {
+            if (this.closed || this.state !== 'active' || this.clipboardReading) return;
+            this.clipboardReading = true; this.updateClipboardControls();
+            const epoch = this.clipboardSnapshot.epoch;
+            let content;
+            try {
+                content = await readBrowserClipboard();
+                if (this.closed || this.state !== 'active' || epoch !== this.clipboardSnapshot.epoch) {
+                    releaseClipboardContent(content);
+                    throw new Error('Session or clipboard changed while permission was pending; retry the action.');
+                }
+                const buffers = [content.png?.buffer, content.image?.rgba?.buffer].filter(Boolean);
+                this.post({ type: 'clipboard-content', content }, [...new Set(buffers)]);
+                toast('Clipboard formats sent for remote negotiation');
+            } catch (error) { releaseClipboardContent(content); if (!this.closed) toast(error.message); }
+            finally { this.clipboardReading = false; this.updateClipboardControls(); }
+        };
+        const fetchActions = element('div', 'actions');
+        this.richFetch = new Map();
+        for (const [format, title] of [['html', 'Fetch remote HTML'], ['image', 'Fetch remote image']]) {
+            const fetch = button(title);
+            fetch.onclick = () => this.post({ type: 'clipboard-request', format });
+            this.richFetch.set(format, fetch); fetchActions.append(fetch);
+        }
+        this.richWrite = button('Copy received formats to this device', { symbol: 'clip' });
+        this.richWrite.onclick = async () => {
+            try {
+                if (this.state !== 'active' || this.closed) throw new Error('The session is not active');
+                await writeBrowserClipboard(this.clipboardSnapshot.value);
+                if (!this.closed) toast('Received formats copied to this device');
+            } catch (error) { if (!this.closed) toast(error.message); }
+        };
+        this.drawer.append(read, fetchActions, this.richStatus, this.richWrite);
+    }
+    updateClipboardControls() {
+        if (this.drawerKind !== 'clipboard') return;
+        if (this.remoteArea) this.remoteArea.value = this.clipboardSnapshot.value.text || '';
+        if (!this.richStatus?.isConnected) return;
+        const active = this.state === 'active' && !this.closed;
+        this.richRead.disabled = !active || this.clipboardReading;
+        for (const [format, control] of this.richFetch) control.disabled = !active || !this.clipboardSnapshot.formats.includes(format);
+        const value = this.clipboardSnapshot.value;
+        const ready = [value.text != null ? 'text' : '', value.html != null ? 'HTML' : '',
+            value.png || value.image ? 'image' : ''].filter(Boolean);
+        this.richWrite.disabled = !active || !ready.length;
+        this.richStatus.textContent = `Remote offers: ${this.clipboardSnapshot.formats.join(', ') || 'none'}. Received: ${ready.join(', ') || 'none'}.`;
+    }
     diagnostics() { return { version: '0.1.0', mode: this.mode, state: this.state, dimensions: [this.width, this.height], renderer: this.renderer?.stats, fallbacks: this.renderer?.fallbackReasons, protocol: this.stats, bridgeRttMs: this.bridgeRttMs ?? null, security: this.security, events: this.log }; }
     updateMetrics() {
         if (!this.renderer || this.closed)
@@ -452,6 +515,9 @@ export class SessionView {
     }
     error(error) {
         this.state = 'failed';
+        this.clipboardSnapshot.clear();
+        this.remoteClipboard = '';
+        this.updateClipboardControls();
         this.overlay.hidden = false;
         this.overlayHeading.textContent = error.code || 'Connection failed';
         this.overlayHeading.classList.add('error-label');
@@ -491,6 +557,7 @@ export class SessionView {
         this.input?.destroy();
         this.post({ type: 'close' });
         this.closed = true;
+        this.clipboardSnapshot.clear();
         setTimeout(() => this.worker?.terminate(), 100);
         this.observer.disconnect();
         clearInterval(this.metricsTimer);
