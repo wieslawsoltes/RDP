@@ -40,3 +40,5 @@ jobs:
         run: /tmp/rdp-browser/bin/python tools/browser-microphone-tests.py
       - name: Compare NSCodec pixels and exercise atomic surface frames through TLS/NLA
         run: /tmp/rdp-browser/bin/python tools/browser-surface-tests.py
+      - name: Compare negotiated GDI blits and caches against pixel oracle over TLS/NLA
+        run: /tmp/rdp-browser/bin/python tools/browser-gdi-tests.py
