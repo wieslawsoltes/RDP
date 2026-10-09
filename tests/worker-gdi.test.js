@@ -19,7 +19,7 @@ test('Actual session worker transfers GDI pixels without detaching canonical des
     assert.equal(drawn.events.some(e => e.type === 'error'), false, JSON.stringify(drawn.events));
     for (let y = 0; y < 20; y++) assert.deepEqual(drawn.pixels.slice(y * drawn.width, y * drawn.width + 32), expected.subarray(y * 32, y * 32 + 32));
     const copied = await call('copy'); assert.equal(copied.pixels[20 * copied.width + 40], 0xf012ab);
-    const stats = copied.events.find(e => e.type === 'statistics'); assert.equal(stats.gdi.orders, 13);
+    const stats = copied.events.find(e => e.type === 'statistics'); assert.equal(stats.gdi.orders, 17);
     const stopped = await call('close'); assert.equal(stopped.closes, 1); assert.equal(stopped.timers, 0);
 });
 test('Actual worker bounds two in-flight render batches while GDI state stays ordered', { timeout: 5000 }, async t => {

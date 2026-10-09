@@ -50,3 +50,13 @@ test('Actual worker mirrors NSCodec before transferring planes so subsequent GDI
     assert.ok(rect);assert.deepEqual(rect.firstPixel,expectedNsPixel(0,0,{width:71,height:15}));
     assert.equal(copy.events.some(e=>e.type==='error'),false);await call('close');
 });
+
+test('Actual worker holds multi-region NSCodec copies until matching END and UI receipt', {timeout:5000}, async t=>{
+    const call=await harness(t,true);await call('begin',100);
+    const held=await call('multi-copy');assert.equal(held.transferred,0);assert.deepEqual(held.acks,[]);
+    // Let empty transport-credit batches drain; hold only the final pixel receipt.
+    await call('hold',true);const end=await call('end',100);assert.equal(end.transferred,2);assert.deepEqual(end.acks,[]);
+    const frame=end.events.filter(e=>e.type==='render').flatMap(e=>e.commands).find(c=>c.type==='surface-frame');assert.ok(frame);
+    assert.equal(frame.rectangles,2);assert.deepEqual(frame.firstPixel,expectedNsPixel(0,0));
+    assert.deepEqual((await call('receipt',end.lastFrame)).acks,[100]);await call('close');
+});

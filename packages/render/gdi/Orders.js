@@ -1,5 +1,6 @@
 import { requireThat } from '../../binary/ProtocolError.js';
 import { bitmapPixels, blit, clipRect, createSurface, dependsOn, DirtyTiles } from './Raster.js';
+import { decodeDeltaRectangles, multiClip, MAX_DELTA_RECTANGLE_BYTES, MAX_DELTA_RECTANGLES } from './DeltaRectangles.js';
 import { BitmapCache } from './BitmapCache.js';
 
 export const MAX_ORDER_COUNT = 4096;
@@ -19,6 +20,10 @@ const schemas = new Map([
     [10, [...rectangle, ['red','u8'], ['green','u8'], ['blue','u8']]],
     [13, [['cacheId','u16'], ...rectangle, ['code','u8'], ...source, ['index','u16']]],
     [14, [['cacheId','u16'], ...rectangle, ['code','u8'], ...source, ...brush, ['index','u16']]],
+    [15, [...rectangle, ['code','u8'], ['count','u8'], ['rectangles','rects']]],
+    [16, [...rectangle, ['code','u8'], ...brush, ['count','u8'], ['rectangles','rects']]],
+    [17, [...rectangle, ['code','u8'], ...source, ['count','u8'], ['rectangles','rects']]],
+    [18, [...rectangle, ['red','u8'], ['green','u8'], ['blue','u8'], ['count','u8'], ['rectangles','rects']]],
 ]);
 const coordinate = value => {
     requireThat(value >= -32768 && value <= 32767, 'GDI_COORDINATE', 'Order coordinate exceeds signed 16-bit range'); return value;
@@ -111,7 +116,7 @@ export class GdiOrders {
         const bounds = control & 4 ? this.bounds : null;
         if (bounds) requireThat(bounds.left <= bounds.right && bounds.top <= bounds.bottom, 'GDI_BOUNDS', 'Inverted drawing bounds');
         let state = this.fields.get(this.lastType);
-        if (!state) { state = Object.fromEntries(schema.map(([name, type]) => [name, type === 'bytes7' ? new Uint8Array(7) : 0])); this.fields.set(this.lastType, state); }
+        if (!state) { state = Object.fromEntries(schema.map(([name, type]) => [name, type === 'bytes7' ? new Uint8Array(7) : type === 'rects' ? [] : 0])); this.fields.set(this.lastType, state); }
         for (let i = 0; i < schema.length; i++) if (mask & (1 << i)) {
             const [name, type] = schema[i];
             if (type === 'coord') state[name] = control & 16 ? coordinate(state[name] + i8(r)) : i16(r);
@@ -119,9 +124,17 @@ export class GdiOrders {
             else if (type === 'u16') state[name] = r.u16le();
             else if (type === 'i8') state[name] = i8(r);
             else if (type === 'color') state[name] = color(r);
+            else if (type === 'rects') {
+                const length = r.u16le();
+                requireThat(length <= MAX_DELTA_RECTANGLE_BYTES, 'GDI_DELTA_RECTS', 'Excessive encoded rectangle list');
+                const next = decodeDeltaRectangles(r.take(length), state.count);
+                for (const rect of state.rectangles) rect.x = rect.y = rect.width = rect.height = 0;
+                state.rectangles = next;
+            }
             else { requireThat(state.style === 3, 'GDI_BRUSH', 'Inline brush data requires BS_PATTERN'); state[name].set(r.take(7)); }
         }
-        this.draw(this.lastType, state, bounds);
+        if (this.lastType >= 15 && this.lastType <= 18) this.drawMulti(this.lastType, state, bounds);
+        else this.draw(this.lastType, state, bounds);
     }
     draw(type, s, bounds) {
         const target = this.surfaceId === 0xffff ? this.screen : this.offscreen.get(this.surfaceId);
@@ -135,17 +148,8 @@ export class GdiOrders {
         let pattern = null, borrowed = null, source = null, sy = s.sy;
         try {
             if (dependsOn(code, 4)) {
-                pattern = this.pattern;
-                if (type === 10) pattern.fill(s.red << 16 | s.green << 8 | s.blue);
-                else {
-                    requireThat([0, 1, 3].includes(s.style), 'GDI_BRUSH', 'Only negotiated solid, null and inline pattern brushes are supported');
-                    if (s.style === 1) return;
-                    if (s.style === 0) pattern.fill(s.fore);
-                    else for (let y = 0; y < 8; y++) {
-                        const row = y === 7 ? s.hatch : s.extra[6 - y];
-                        for (let x = 0; x < 8; x++) pattern[y * 8 + x] = row & (128 >>> x) ? s.back : s.fore;
-                    }
-                }
+                pattern = this.brush(type, s);
+                if (!pattern) return;
             }
             if (dependsOn(code, 2)) {
                 if (type === 2) source = this.screen;
@@ -161,6 +165,60 @@ export class GdiOrders {
             const changed = blit(target, s, { source, sx: s.sx, sy, pattern, orgX: s.orgX, orgY: s.orgY, code, bounds });
             if (changed && this.surfaceId === 0xffff) this.dirty.mark(changed);
         } finally { borrowed?.release(); }
+    }
+    brush(type, s) {
+        const pattern = this.pattern;
+        if (type === 10) pattern.fill(s.red << 16 | s.green << 8 | s.blue);
+        else {
+            requireThat([0, 1, 3].includes(s.style), 'GDI_BRUSH', 'Only negotiated solid, null and inline pattern brushes are supported');
+            if (s.style === 1) return null;
+            if (s.style === 0) pattern.fill(s.fore);
+            else for (let y = 0; y < 8; y++) {
+                const row = y === 7 ? s.hatch : s.extra[6 - y];
+                for (let x = 0; x < 8; x++) pattern[y * 8 + x] = row & (128 >>> x) ? s.back : s.fore;
+            }
+        }
+        return pattern;
+    }
+    drawMulti(type, s, bounds) {
+        const target = this.surfaceId === 0xffff ? this.screen : this.offscreen.get(this.surfaceId);
+        requireThat(target && s.width >= 0 && s.height >= 0 && s.count <= MAX_DELTA_RECTANGLES,
+            'GDI_RECT', 'Invalid multi-order target, extent or count');
+        const baseType = [0, 1, 2, 10][type - 15], code = baseType === 10 ? 0xf0 : s.code;
+        requireThat(![0, 1].includes(baseType) || !dependsOn(code, 2), 'GDI_ROP', 'Multi destination/pattern order cannot read source');
+        requireThat(![0, 2].includes(baseType) || !dependsOn(code, 4), 'GDI_ROP', 'Multi-order has an unavailable pattern dependency');
+        const areas = multiClip(target, s, s.rectangles, s.count, bounds);
+        if (!areas.length || code === 0xaa) return;
+        const pattern = dependsOn(code, 4) ? this.brush(baseType, s) : null;
+        if (dependsOn(code, 4) && !pattern) return;
+        const source = dependsOn(code, 2) ? this.screen : null;
+        const pixels = areas.reduce((sum, r) => sum + r.width * r.height, 0);
+        // Same-surface region copies must observe the pre-order source even
+        // across different clip rectangles. Snapshot only disjoint visible
+        // source pieces, not the full desktop or the unclipped base rectangle.
+        const snapshot = source === target;
+        this.charge(pixels * (snapshot ? 2 : 1));
+        const copies = [];
+        try {
+            if (source) for (const area of areas) {
+                const sx = s.sx + area.x - s.x, sy = s.sy + area.y - s.y;
+                requireThat(sx >= 0 && sy >= 0 && sx + area.width <= source.width && sy + area.height <= source.height,
+                    'GDI_SOURCE', 'Multi-order source lies outside the primary surface');
+                if (snapshot) {
+                    const copy = { width: area.width, height: area.height, pixels: new Uint32Array(area.width * area.height) };
+                    copies.push(copy);
+                    for (let y = 0; y < area.height; y++) copy.pixels.set(source.pixels.subarray(
+                        (sy + y) * source.width + sx, (sy + y) * source.width + sx + area.width), y * area.width);
+                }
+            }
+            for (let i = 0; i < areas.length; i++) {
+                const area = areas[i];
+                const changed = blit(target, area, { source: snapshot ? copies[i] : source,
+                    sx: snapshot ? 0 : s.sx + area.x - s.x, sy: snapshot ? 0 : s.sy + area.y - s.y,
+                    pattern, orgX: s.orgX, orgY: s.orgY, code });
+                if (changed && this.surfaceId === 0xffff) this.dirty.mark(changed);
+            }
+        } finally { for (const copy of copies) copy.pixels.fill(0); }
     }
     alternate(control, r) {
         requireThat((control & 3) === 2 && this.offscreenEnabled, 'GDI_ALTERNATE', 'Unnegotiated alternate secondary order');
@@ -196,7 +254,10 @@ export class GdiOrders {
         this.closed = true; this.screen.pixels.fill(0); this.screen.pixels = new Uint32Array(); this.dirty.clear(); this.cache.close();
         for (const surface of this.offscreen.values()) surface.pixels.fill(0);
         this.offscreen.clear(); this.offscreenBytes = 0; this.palette.fill(0); this.pattern.fill(0);
-        for (const state of this.fields.values()) state.extra?.fill(0);
+        for (const state of this.fields.values()) {
+            state.extra?.fill(0);
+            for (const rect of state.rectangles || []) rect.x = rect.y = rect.width = rect.height = 0;
+        }
         this.fields.clear(); this.bounds = { left: 0, top: 0, right: 0, bottom: 0 };
     }
 }

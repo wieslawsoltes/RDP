@@ -80,3 +80,14 @@ test('GDI primary pixels reset at desktop reactivation while stale marked-frame 
     h.peer.data(2,slowOrders(scr(30,10,7,5,0xcc,0,0)));await turns();
     assert.equal(h.session.gdi.screen.pixels[10*h.session.desktop.width+30],0);
 });
+
+test('Marked NSCodec frames keep multi-order clipping and source snapshots atomic until presentation',async t=>{
+    const {multi}=await import('./fixtures/MultiGdiWire.js');const h=await fixture(t);
+    h.peer.surface(concat(surfaceMarker(0,123),surfaceBits({x:4,y:5})));
+    h.peer.data(2,slowOrders(multi(17,{x:5,y:5,width:6,height:5},[{x:8,y:5,width:3,height:5},{x:5,y:5,width:4,height:5}],{sx:4,sy:5})));
+    await turns();assert.equal(h.session.state,'active');assert.equal(h.events.some(e=>e.type==='bitmaps'||e.type==='surface-frame'),false);
+    h.peer.surface(surfaceMarker(1,123));await turns();
+    const frame=h.events.find(e=>e.type==='surface-frame');assert.ok(frame);assert.deepEqual(h.state.acks,[]);
+    for(let y=0;y<5;y++)for(let x=0;x<6;x++)assert.equal(h.session.gdi.screen.pixels[(y+5)*h.session.desktop.width+x+5],color(expectedNsPixel(x,y)));
+    assert.equal(h.session.presentSurface(frame.token),true);await turns();assert.deepEqual(h.state.acks,[123]);
+});

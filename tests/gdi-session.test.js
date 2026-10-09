@@ -23,7 +23,7 @@ const capMap = options => new Map(clientCapabilities({ width: 200, height: 200, 
 test('GDI profile is opt-in and only advertised at matching 24/32-bit depth', async () => {
     for (const bpp of [8, 15, 16, 24, 32]) for (const orders of [false, true]) {
         const caps = capMap({ bpp, orders }), active = orders && bpp >= 24;
-        assert.deepEqual([...caps.get(3).subarray(32, 64)], [...new Uint8Array(32).fill(1, 0, active ? 5 : 0)]);
+        assert.deepEqual([...caps.get(3).subarray(32, 64)], [...new Uint8Array(32).fill(1, 0, active ? 5 : 0).fill(1, 15, active ? 19 : 15)]);
         assert.equal(caps.has(4), active); assert.equal(caps.has(17), active); assert.equal(caps.has(16), active);
         if (active) { assert.equal(new DataView(caps.get(17).buffer, caps.get(17).byteOffset).getUint16(4, true), 16384 * bpp / 32); assert.ok(caps.get(16).every(v => v === 0)); }
     }
@@ -50,7 +50,7 @@ test('GDI slow path, fragmented fast path, bitmap interleave, offscreen and cach
         h.peer.drawGdiScene(); await turns(); assert.equal(h.session.state, 'active', JSON.stringify(h.events.filter(e => e.type === 'error')));
         const expected = expectedScene(), screen = h.session.gdi.screen;
         for (let y = 0; y < 20; y++) assert.deepEqual(screen.pixels.slice(y * screen.width, y * screen.width + 32), expected.subarray(y * 32, y * 32 + 32));
-        assert.equal(h.session.stats().gdi.orders, 12); assert.ok(h.session.stats().gdi.cacheBytes > 0);
+        assert.equal(h.session.stats().gdi.orders, 16); assert.ok(h.session.stats().gdi.cacheBytes > 0);
         const engine = h.session.gdi, pixels = engine.screen.pixels;
         h.session.close(); h.peer.close(); assert.ok(pixels.every(v => v === 0)); assert.equal(engine.closed, true);
     }
@@ -85,4 +85,20 @@ test('Compressed drawing orders use the same MPPC history across slow and fast o
     h.peer.send(fastPacket(mppcFixture([...second],1),0,0x21));await turns();
     assert.equal(h.session.state,'active');assert.equal(h.session.gdi.screen.pixels[202],0x123456);
     assert.equal(h.session.bulk.offset,before+second.length);h.session.close();h.peer.close();
+});
+
+test('Compressed multi orders keep MPPC history across slow-path and fragmented fast-path fields', async () => {
+    const { multi } = await import('./fixtures/MultiGdiWire.js');
+    const h=fixture({orders:true});h.session.start();await turns();
+    const first=W.slowOrders(multi(18,{x:0,y:0,width:5,height:5},[{x:1,y:1,width:2,height:2}],{color:0x123456}));
+    const packed=mppcFixture([...first],1);
+    h.peer.indication(h.peer.ioChannel,shareControl(7,h.peer.serverId,new Writer().u32le(h.peer.shareId).u8(0).u8(1).u16le(first.length+18)
+        .u8(2).u8(0xa1).u16le(packed.length+18).put(packed).finish()));await turns();
+    const second=W.fastOrders(multi(17,{x:2,y:1,width:3,height:2},[{x:2,y:1,width:1,height:2},{x:3,y:1,width:1,height:2}],{sx:1,sy:1}));
+    const before=h.session.bulk.offset;
+    h.peer.send(fastPacket(mppcFixture([...second.subarray(0,11)],1),2,0x21));
+    h.peer.send(fastPacket(mppcFixture([...second.subarray(11)],1),1,0x21));await turns();
+    assert.equal(h.session.state,'active');assert.equal(h.session.bulk.offset,before+second.length);
+    for(let y=1;y<=2;y++)for(let x=2;x<=3;x++)assert.equal(h.session.gdi.screen.pixels[y*200+x],0x123456);
+    h.session.close();h.peer.close();
 });

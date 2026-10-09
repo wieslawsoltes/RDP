@@ -42,6 +42,19 @@ def expected_pixels() -> list[int]:
             c = (220 - x * 10) << 16 | (80 + y * 20) << 8 | 90
             put(x + 1, y + 12, c)
             put(x + 8, y + 12, c)
+    def apply(base, rectangles, transform):
+        before = out.copy()
+        for y in range(20):
+            for x in range(32):
+                def inside(r):
+                    return r[0] <= x < r[0]+r[2] and r[1] <= y < r[1]+r[3]
+                if inside(base) and any(inside(r) for r in rectangles):
+                    put(x, y, transform(x, y, before))
+    apply((0,14,14,6), [(1,15,5,3),(5,16,4,2)], lambda x,y,b: 0x224466)
+    apply((10,10,12,8), [(12,11,5,4),(16,13,5,3)],
+          lambda x,y,b: b[y*32+x] ^ (0x010203 if ((x+2)&7)==((y-1)&7) else 0xa0b0c0))
+    apply((20,10,12,10), [(22,12,4,3),(25,14,4,3)], lambda x,y,b: b[y*32+x]^0xffffff)
+    apply((3,2,20,9), [(9,4,8,3),(4,3,6,4)], lambda x,y,b: b[y*32+x-1])
     put(31, 19, 0xf012ab)
     return out
 
@@ -107,7 +120,7 @@ def main() -> None:
                         page.get_by_role('button', name='Disconnect and close session', exact=True).click()
                         assert not errors, errors
                         print(json.dumps({'pixelsCompared': 640, 'pixelDifferences': 0,
-                            'orders': ['OpaqueRect', 'ScrBlt', 'PatBlt', 'MemBlt'], 'revision2Cache': True,
+                            'orders': ['OpaqueRect', 'ScrBlt', 'PatBlt', 'MemBlt', 'MultiDstBlt', 'MultiPatBlt', 'MultiScrBlt', 'MultiOpaqueRect'], 'revision2Cache': True,
                             'offscreen': True, 'mixedFastSlowBitmapUpdates': True, 'websocketTlsNla': True,
                             'scope': 'Canvas in Chromium and co-developed peer; not independent Windows or physical GPU qualification'}, indent=2))
                     finally:

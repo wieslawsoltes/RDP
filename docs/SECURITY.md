@@ -73,7 +73,10 @@ Drawing orders are opt-in and processed inside the session worker, not the
 credential-handling gateway. Dimensions, field masks, order classes, cache IDs,
 indices, source reads, lengths, brush styles and output budgets are checked.
 Each update permits at most 4096 orders and 64 Mi pixel-work units; cache decode
-and indexed-palette expansion consume that budget too. There is no dynamic code
+and indexed-palette expansion consume that budget too. Multi-order regions have
+at most 45 rectangles and 383 encoded bytes. Only visible, disjoint pixels
+are snapshotted for same-surface copies; those allocations and writes also
+consume the budget (at most 64 MiB transient pixel storage per multi-order). There is no dynamic code
 generation. Unsupported stateful orders terminate rather than desynchronize the
 session. The renderer receives owned dirty-pixel buffers, never cache aliases.
 

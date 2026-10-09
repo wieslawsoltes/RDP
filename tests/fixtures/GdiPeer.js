@@ -5,6 +5,8 @@ import { clientCapabilities, capability } from '../../packages/protocol/Capabili
 import { parseSendData } from '../../packages/protocol/Mcs.js';
 import { parseShare, shareControl } from '../../packages/protocol/Share.js';
 import * as W from './GdiWire.js';
+import { multi } from './MultiGdiWire.js';
+const rect = (x,y,width,height) => ({x,y,width,height});
 
 export function readConfirmation(body) {
     const r = new Reader(body); r.u32le(); r.u16le();
@@ -35,6 +37,19 @@ export function expectedScene() {
         const c = (220 - x * 10) << 16 | (80 + y * 20) << 8 | 90;
         set(x + 1, y + 12, c); set(x + 8, y + 12, c);
     }
+    // A separate per-pixel region oracle, independent of production clipping.
+    const apply = (base, rectangles, transform) => {
+        const before = pixels.slice();
+        for (let y=0;y<20;y++) for(let x=0;x<32;x++) {
+            const inside = r => x>=r.x && y>=r.y && x<r.x+r.width && y<r.y+r.height;
+            if (inside(base) && rectangles.some(inside)) set(x,y,transform(x,y,before));
+        }
+    };
+    apply(rect(0,14,14,6), [rect(1,15,5,3),rect(5,16,4,2)], () => 0x224466);
+    apply(rect(10,10,12,8), [rect(12,11,5,4),rect(16,13,5,3)], (x,y,b) =>
+        b[y*32+x] ^ (((x+2)&7)===((y-1)&7) ? 0x010203 : 0xa0b0c0));
+    apply(rect(20,10,12,10), [rect(22,12,4,3),rect(25,14,4,3)], (x,y,b) => b[y*32+x]^0xffffff);
+    apply(rect(3,2,20,9), [rect(9,4,8,3),rect(4,3,6,4)], (x,y,b) => b[y*32+x-1]);
     set(31, 19, 0xf012ab); return pixels;
 }
 /** Co-developed server fixture, not independent Windows interoperability. */
@@ -60,6 +75,7 @@ export function configureGdiPeer(peer, { revision = 1, bpp = 24, paintOnActive =
     };
     peer.drawGdiScene = () => {
         assert.ok(state.caps?.get(3)?.subarray(32, 37).every(v => v === 1), 'Client did not negotiate blit profile');
+        assert.ok(state.caps?.get(3)?.subarray(47, 51).every(v => v === 1), 'Client did not negotiate multi orders');
         assert.ok(state.caps.has(revision === 1 ? 4 : 19), 'Wrong cache revision');
         const tile = [];
         for (let y = 3; y >= 0; y--) for (let x = 0; x < 4; x++) tile.push(x + y + 30, y * 50 + 10, x * 50 + 5);
@@ -72,7 +88,15 @@ export function configureGdiPeer(peer, { revision = 1, bpp = 24, paintOnActive =
         const bitmap = [];
         for (let y = 0; y < 2; y++) for (let x = 0; x < 3; x++) bitmap.push(220 - x * 10, 80 + y * 20, 90, 255);
         peer.bitmap(1, 12, 3, 2, Uint8Array.from(bitmap));
-        peer.data(2, W.slowOrders(W.scr(8, 12, 3, 2, 0xcc, 1, 12), W.opaque(31, 19, 1, 1, 0xf012ab)));
+        peer.data(2, W.slowOrders(W.scr(8, 12, 3, 2, 0xcc, 1, 12),
+            multi(18,rect(0,14,14,6),[rect(1,15,5,3),rect(5,16,4,2)],{color:0x224466}),
+            multi(16,rect(10,10,12,8),[rect(12,11,5,4),rect(16,13,5,3)],
+                {code:0x5a,style:3,orgX:-2,orgY:1,back:0x010203,fore:0xa0b0c0,hatch:1,extra:Uint8Array.of(2,4,8,16,32,64,128)})));
+        const regions = W.fastOrders(
+            multi(15,rect(20,10,12,10),[rect(22,12,4,3),rect(25,14,4,3)],{code:0x55}),
+            multi(17,rect(3,2,20,9),[rect(9,4,8,3),rect(4,3,6,4)],{sx:2,sy:2}));
+        peer.send(fastPacket(regions.subarray(0,13),2)); peer.send(fastPacket(regions.subarray(13),1));
+        peer.data(2,W.slowOrders(W.opaque(31,19,1,1,0xf012ab)));
         state.scenes++;
     };
     peer.onActive = (...args) => { active(...args); if (paintOnActive) peer.drawGdiScene(); };
