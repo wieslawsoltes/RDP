@@ -1,3 +1,4 @@
+import { BrowserAudio } from './BrowserAudio.js';
 import { readBrowserClipboard, writeBrowserClipboard, releaseClipboardContent, ClipboardSnapshot } from './BrowserClipboard.js';
 import { normalizeMonitorLayout } from '../../packages/protocol/MonitorLayout.js';
 import { createRenderer } from '../../packages/render/RendererFactory.js';
@@ -7,7 +8,7 @@ import { icon, button, download, toast, formatBytes, element } from './ui.js';
 export class SessionView {
     constructor({ options, mode, password, token, onClose, onSelect }) {
         this.id = crypto.randomUUID();
-        this.options = options;
+        this.options = { ...options, audio: options.audio === true && typeof globalThis.AudioContext === 'function' };
         this.mode = mode;
         this.onClose = onClose;
         this.width = options.width;
@@ -54,6 +55,19 @@ export class SessionView {
         const cad = button('Ctrl Alt Del', { className: 'small-button', title: 'Send Ctrl+Alt+Delete to the remote session' });
         cad.onclick = () => this.post({ type: 'input', events: chord(['ControlLeft', 'AltLeft', 'Delete']) });
         toolbar.append(cad, element('span', 'separator'));
+        if (this.options.audio) {
+            this.audio = new BrowserAudio({ consume: (id, disposition) => this.post({ type: 'audio-consumed', id, disposition }),
+                status: value => { if (this.audioStatus) this.audioStatus.textContent = `Sound: ${value}`; } });
+            const enable = button('Enable sound', { className: 'small-button', title: 'Allow PCM audio playback for this session' });
+            enable.onclick = () => this.audio.enable().catch(error => toast(`Sound: ${error.message}`));
+            const mute = button('Mute sound', { className: 'small-button', title: 'Stop queued audio and mute this session' });
+            mute.onclick = () => this.audio.mute();
+            const volume = element('input'); volume.type = 'range'; volume.min = '0'; volume.max = '100'; volume.value = '100';
+            volume.setAttribute('aria-label', 'Remote sound volume'); volume.style.width = '70px';
+            volume.oninput = () => this.audio.setVolume(Number(volume.value) / 100);
+            this.audioStatus = element('span', 'muted', 'Sound: awaiting formats');
+            toolbar.append(enable, mute, volume, this.audioStatus);
+        }
         for (const [symbol, label, action] of [
             ['refresh', 'Request full desktop refresh', () => this.post({ type: 'refresh' })],
             ['desktop', 'Monitor layout', () => this.openDrawer('display')],
@@ -179,6 +193,15 @@ export class SessionView {
             this.bridgeRttMs = value.bridgeRttMs;
             return;
         }
+        if (value.type === 'audio') {
+            if (value.kind === 'samples') {
+                if (this.audio && !this.closed && !['failed', 'closed'].includes(this.state)) this.audio.receive(value);
+                else { for (const plane of value.planes) plane.fill(0); this.post({ type: 'audio-consumed', id: value.id, disposition: 'dropped' }); }
+            } else if (value.kind === 'reset') this.audio?.reset();
+            else if (value.kind === 'closed') this.audio?.close();
+            else if (value.kind === 'formats' && this.audioStatus) this.audioStatus.textContent = `Sound: ${value.formats.length} PCM formats; enable playback`;
+            return; // Audio sample data must never enter logs or diagnostics.
+        }
         if (value.type === 'clipboard') {
             if (this.state === 'failed' || this.state === 'closed') return;
             if (this.clipboardSnapshot.apply(value)) {
@@ -213,7 +236,7 @@ export class SessionView {
         }
         if (value.type === 'state' || value.type === 'stage') {
             this.state = value.state;
-            if (value.state === 'closed') this.clipboardSnapshot.clear();
+            if (value.state === 'closed') { this.clipboardSnapshot.clear(); this.audio?.close(); }
             this.updateClipboardControls();
             this.stateLabel.textContent = value.state;
             this.overlay.hidden = value.state === 'active';
@@ -515,6 +538,7 @@ export class SessionView {
     }
     error(error) {
         this.state = 'failed';
+        this.audio?.close();
         this.clipboardSnapshot.clear();
         this.remoteClipboard = '';
         this.updateClipboardControls();
@@ -555,6 +579,7 @@ export class SessionView {
         if (this.closed)
             return;
         this.input?.destroy();
+        this.audio?.close();
         this.post({ type: 'close' });
         this.closed = true;
         this.clipboardSnapshot.clear();

@@ -23,7 +23,7 @@
 | Display control | Initial GCC and dynamic 1–16-monitor layouts, negative coordinates, rotation/scaling attributes, bounds checks and server-driven reactivation. | One spanning canvas; no auxiliary display windows or physical multi-screen placement. Windows interoperability unverified; 8192-axis / 16-megapixel client budget. |
 | Keyboard | Scan codes, Unicode code units including surrogate pairs, selected extended keys, control chords, focus-loss release. | Browser/OS-reserved shortcuts remain platform constraints; complete keyboard-layout/IME equivalence unqualified. |
 | Pointer input | Mouse move/buttons/wheel/horizontal wheel/extra buttons, pointer capture, touch/pen-to-mouse mapping. | No native multitouch, pen pressure/tilt, relative/raw mouse, gesture protocol or RDP input extension. |
-| Audio output / input | Not implemented. | RDPSND, AUDIN and codec/device negotiation absent. |
+| Audio output / input | Opt-in RDPSND PCM playback: mono/stereo, 8/16/24/32-bit, 8–96 kHz, format/quality/training negotiation, split Wave and Wave2, consumption confirmations, explicit Web Audio enable/mute/local volume. | No microphone/AUDIN, compressed audio, UDP sound, remote pitch/volume or physical speaker qualification. Sixteen-sample / 2 MiB / two-second playback bounds; muted/overflow data is dropped and confirmed. |
 | Filesystem / printing | Not implemented. | RDPDR drives, printers, ports, print spooling and device I/O absent. |
 | USB / smart cards | Not implemented. | No generic USB redirection, PnP bridge, smart-card resources or logon. |
 | Cameras / multimedia | Not implemented. | No camera capture, multimedia redirection or video optimization. |

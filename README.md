@@ -31,6 +31,14 @@ to the OS clipboard automatically. HTML stays inert inside this application.
 Image transfers support PNG and uncompressed Windows DIB/DIBV5; file streaming
 is not implemented. See [format coverage and resource limits](docs/changes/0006-rich-clipboard.md).
 
+PCM audio playback is also **off by default**. Enable **PCM sound** in the
+connection options, then click **Enable sound** in the session toolbar. The
+client negotiates supported uncompressed mono/stereo formats; Web Audio starts
+only after the user action. **Mute sound** stops and clears queued samples, and
+closing the session releases the audio context. Volume changes are local.
+Microphone, compressed audio and UDP audio are not implemented. See
+[audio protocol coverage and tests](docs/changes/0008-audio-output.md).
+
 ## Run the application
 
 Install a maintained Node.js release compatible with Node 22 or newer. There are no npm or other runtime package dependencies and no compilation step.
