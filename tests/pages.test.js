@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { createHash } from 'node:crypto';
 import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm, access } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -12,7 +13,9 @@ test('Pages build is subpath-safe and includes all browser imports but no gatewa
     assert.ok(files.has('apps/client/session-worker.js'));
     assert.ok(files.has('apps/client/Gateway.js'));
     assert.ok(files.has('packages/render/shaders.js'));
+    assert.deepEqual(Object.keys(manifest.sha256).sort(), [...files].sort());
     for (const name of files) {
+        assert.equal(manifest.sha256[name], createHash('sha256').update(await readFile(join(output, name))).digest('hex'), name);
         assert.ok(!/^(apps\/(bridge|gateway)|packages\/(security|transport)|tests|\.git)\//.test(name), name);
         assert.ok(!/targets\.json|\.pem$|\.key$|\.env$|render-test/.test(name), name);
         if (!name.endsWith('.js')) continue;

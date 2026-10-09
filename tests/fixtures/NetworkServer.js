@@ -38,7 +38,7 @@ export async function makeCertificate() {
     return { key, cert, certificate, pin: createHash('sha256').update(certificate.raw).digest('hex'), close: () => rm(directory, { recursive: true, force: true }) };
 }
 /** Co-developed test server. It is deliberately not an independent conformance oracle. */
-export async function serveRdp(cert, { nla = false, badBinding = false, onActive = () => { }, onInput = () => { } } = {}) {
+export async function serveRdp(cert, { nla = false, badBinding = false, onActive = () => { }, onInput = () => { }, configurePeer = () => {} } = {}) {
     const connections = new Set(), errors = [], credentialRecords = [], context = tls.createSecureContext(cert);
     const server = net.createServer(raw => {
         connections.add(raw);
@@ -106,6 +106,7 @@ export async function serveRdp(cert, { nla = false, badBinding = false, onActive
             }
             const pending = reader.detach();
             const peer = new LoopbackServer({ requestedProtocols: nla ? 2 : 1, send: bytes => socket.write(bytes), onInput, onActive });
+            configurePeer(peer);
             socket.on('data', bytes => {
                 try {
                     peer.receive(new Uint8Array(bytes));

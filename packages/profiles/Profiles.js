@@ -1,5 +1,5 @@
 const STORAGE_KEY = 'lrdp.profiles.v1';
-const allowed = ['id', 'name', 'targetId', 'username', 'domain', 'security', 'width', 'height', 'bpp', 'backend', 'clipboard', 'resize'];
+const allowed = ['id', 'name', 'targetId', 'username', 'domain', 'security', 'width', 'height', 'bpp', 'backend', 'clipboard', 'richClipboard', 'resize'];
 export function sanitizeProfile(input) {
     const value = {};
     for (const key of allowed)
@@ -18,6 +18,7 @@ export function sanitizeProfile(input) {
     value.bpp = [15, 16, 24, 32].includes(Number(value.bpp)) ? Number(value.bpp) : 24;
     value.backend = ['auto', 'webgpu', 'webgl2', 'canvas'].includes(value.backend) ? value.backend : 'auto';
     value.clipboard = value.clipboard !== false;
+    value.richClipboard = value.clipboard && value.richClipboard === true;
     value.resize = value.resize !== false;
     return value;
 }

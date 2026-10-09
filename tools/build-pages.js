@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { readdir, readFile, mkdir, writeFile, copyFile, rm, lstat } from 'node:fs/promises';
 import { resolve, join, dirname, extname, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -44,7 +45,10 @@ export async function buildPages(output = join(root, 'dist/pages')) {
     await writeFile(join(output, '.nojekyll'), '');
     await copyFile(join(root, 'LICENSE'), join(output, 'LICENSE'));
     const sha = /^[0-9a-f]{40}$/.test(process.env.GITHUB_SHA || '') ? process.env.GITHUB_SHA : 'local';
-    const manifest = { version: 1, commit: sha, hosting: 'static-browser-client', gateway: 'runs separately on the user machine', files: ['index.html', '.nojekyll', 'LICENSE', ...files].sort() };
+    const published = ['index.html', '.nojekyll', 'LICENSE', ...files].sort();
+    const hashes = {};
+    for (const name of published) hashes[name] = createHash('sha256').update(await readFile(join(output, name))).digest('hex');
+    const manifest = { version: 1, commit: sha, hosting: 'static-browser-client', gateway: 'runs separately on the user machine', files: published, sha256: hashes };
     await writeFile(join(output, 'build.json'), JSON.stringify(manifest, null, 2) + '\n');
     return manifest;
 }
