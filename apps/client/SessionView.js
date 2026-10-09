@@ -6,11 +6,12 @@ import { InputController } from '../../packages/input/InputController.js';
 import { chord } from '../../packages/input/ScanCodes.js';
 import { icon, button, download, toast, formatBytes, element } from './ui.js';
 export class SessionView {
-    constructor({ options, mode, password, token, onClose, onSelect }) {
+    constructor({ options, mode, password, token, onClose, onSelect, onReconnect }) {
         this.id = crypto.randomUUID();
         this.options = { ...options, audio: options.audio === true && typeof globalThis.AudioContext === 'function' };
         this.mode = mode;
         this.onClose = onClose;
+        this.onReconnect = onReconnect;
         this.width = options.width;
         this.height = options.height;
         this.state = 'initializing';
@@ -112,6 +113,12 @@ export class SessionView {
         this.overlayHeading = element('h2', '', 'Opening workspace');
         this.overlayDetail = element('p', '', 'Selecting an available renderer…');
         card.append(icon('monitor'), this.overlayHeading, this.overlayDetail);
+        this.reconnectButton = button('Reconnect…', { className: 'primary', title: 'Return to connection setup with fresh credentials' });
+        this.reconnectButton.hidden = true;
+        this.reconnectButton.onclick = () => {
+            if (this.mode === 'remote' && !this.closed && ['failed', 'closed'].includes(this.state)) this.onReconnect?.(this);
+        };
+        card.append(this.reconnectButton);
         this.overlay.append(card);
         this.body.append(this.overlay);
         this.drawer = element('aside', 'drawer');
@@ -121,7 +128,10 @@ export class SessionView {
         this.footer = element('div', 'session-foot');
         this.stateLabel = element('span', '', 'Initializing');
         this.metrics = element('div', 'live-stats');
-        this.footer.append(this.stateLabel, this.metrics);
+        this.healthLabel = element('span', 'muted', this.mode === 'lab' ? '' : 'Gateway: connecting');
+        this.healthLabel.setAttribute('aria-label', 'Gateway connection health');
+        this.healthLabel.setAttribute('role', 'status');
+        this.footer.append(this.stateLabel, this.healthLabel, this.metrics);
         this.root.append(this.footer);
         this.observer = new ResizeObserver(() => this.layout());
         this.observer.observe(this.viewport);
@@ -154,7 +164,7 @@ export class SessionView {
         }
         catch (error) {
             this.error({ code: 'INITIALIZATION', message: error.message });
-        }
+        } finally { password = token = ''; }
     }
     bindInput() {
         this.input?.destroy();
@@ -187,6 +197,13 @@ export class SessionView {
         }
         if (value.type === 'statistics') {
             this.stats = value;
+            return;
+        }
+        if (value.type === 'connection-health') {
+            if (!['failed', 'closed'].includes(this.state)) {
+                this.connectionHealth = { status: value.status, phase: value.phase };
+                this.healthLabel.textContent = `Gateway: ${value.status}`;
+            }
             return;
         }
         if (value.type === 'latency') {
@@ -236,7 +253,12 @@ export class SessionView {
         }
         if (value.type === 'state' || value.type === 'stage') {
             this.state = value.state;
-            if (value.state === 'closed') { this.clipboardSnapshot.clear(); this.audio?.close(); }
+            if (value.state === 'closed') {
+                this.clipboardSnapshot.clear(); this.audio?.close(); this.input?.destroy();
+                this.displayReady = false; this.resolution.disabled = true;
+                this.healthLabel.textContent = 'Gateway: disconnected';
+            }
+            this.reconnectButton.hidden = value.state !== 'closed' || this.mode !== 'remote' || !this.onReconnect;
             this.updateClipboardControls();
             this.stateLabel.textContent = value.state;
             this.overlay.hidden = value.state === 'active';
@@ -519,7 +541,7 @@ export class SessionView {
         this.richWrite.disabled = !active || !ready.length;
         this.richStatus.textContent = `Remote offers: ${this.clipboardSnapshot.formats.join(', ') || 'none'}. Received: ${ready.join(', ') || 'none'}.`;
     }
-    diagnostics() { return { version: '0.1.0', mode: this.mode, state: this.state, dimensions: [this.width, this.height], renderer: this.renderer?.stats, fallbacks: this.renderer?.fallbackReasons, protocol: this.stats, bridgeRttMs: this.bridgeRttMs ?? null, security: this.security, events: this.log }; }
+    diagnostics() { return { version: '0.1.0', mode: this.mode, state: this.state, dimensions: [this.width, this.height], renderer: this.renderer?.stats, fallbacks: this.renderer?.fallbackReasons, protocol: this.stats, bridgeRttMs: this.bridgeRttMs ?? null, connectionHealth: this.connectionHealth || null, security: this.security, events: this.log }; }
     updateMetrics() {
         if (!this.renderer || this.closed)
             return;
@@ -538,6 +560,9 @@ export class SessionView {
     }
     error(error) {
         this.state = 'failed';
+        this.displayReady = false; this.resolution.disabled = true;
+        this.reconnectButton.hidden = this.mode !== 'remote' || !this.onReconnect;
+        this.healthLabel.textContent = this.mode === 'remote' ? 'Gateway: disconnected' : '';
         this.audio?.close();
         this.clipboardSnapshot.clear();
         this.remoteClipboard = '';
@@ -546,7 +571,7 @@ export class SessionView {
         this.overlayHeading.textContent = error.code || 'Connection failed';
         this.overlayHeading.classList.add('error-label');
         this.overlayDetail.textContent = error.message;
-        this.input?.release();
+        this.input?.destroy();
         this.post({ type: 'close' });
         this.stateLabel.textContent = `failed · ${error.code}`;
         this.log.push({ at: new Date().toISOString(), code: error.code, message: error.message });

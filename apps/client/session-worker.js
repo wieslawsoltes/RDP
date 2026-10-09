@@ -1,10 +1,11 @@
+import { ConnectionWatchdog } from '../../packages/protocol/ConnectionWatchdog.js';
 import { WireSendQueue } from '../../packages/protocol/WireSendQueue.js';
 import { Session } from '../../packages/protocol/Session.js';
 import { LoopbackServer } from '../../packages/lab/LoopbackServer.js';
 import { LabDesktop } from '../../packages/lab/LabDesktop.js';
-let session, socket, lab, peer, credentials, outbound, flushTimer, statsTimer, pingTimer;
+let session, socket, lab, peer, credentials, startup, outbound, watchdog, flushTimer, statsTimer, watchdogTimer;
 let stopped = false, queue = [], queuedBytes = 0, wireCredit = 0, nextFrame = 1;
-const inflight = new Map(), pingTimes = new Map();
+const inflight = new Map();
 const send = value => postMessage(value);
 function fail(error) {
     if (stopped)
@@ -12,24 +13,31 @@ function fail(error) {
     send({ type: 'error', code: error.code || 'CLIENT_ERROR', message: String(error.message || error).slice(0, 512) });
     stop();
 }
+function clearSecrets() {
+    if (credentials) credentials.password = '';
+    if (startup) startup.password = startup.token = '';
+    credentials = startup = null;
+}
 function stop() {
-    if (stopped)
-        return;
+    if (stopped) return;
     stopped = true;
     clearTimeout(flushTimer);
     clearInterval(statsTimer);
-    clearInterval(pingTimer);
-    outbound?.close();
-    session?.close();
-    lab?.close();
-    if (socket?.readyState === 1)
-        socket.send(JSON.stringify({ type: 'disconnect' }));
-    socket?.close();
+    clearInterval(watchdogTimer);
+    watchdog?.close();
+    clearSecrets();
+    // A failed send or close must not prevent the remaining owners releasing.
+    for (const owner of [outbound, session, lab]) {
+        try { owner?.close(); } catch { /* Continue clearing every owner. */ }
+    }
+    if (socket) {
+        socket.onopen = socket.onmessage = socket.onerror = socket.onclose = null;
+        try { if (socket.readyState === 1) socket.send(JSON.stringify({ type: 'disconnect' })); } catch { /* Socket failed. */ }
+        try { socket.close(); } catch { /* Already closing. */ }
+    }
     queue = [];
     queuedBytes = wireCredit = 0;
     inflight.clear();
-    pingTimes.clear();
-    credentials = null;
 }
 function enqueue(event) {
     let size = 0;
@@ -49,6 +57,11 @@ function enqueue(event) {
     scheduleFlush();
 }
 function event(value) {
+    if (stopped) return;
+    if (value.type === 'state' && watchdog) {
+        if (value.state === 'active' && !watchdog.activated()) return;
+        if (value.state === 'reactivating') watchdog.reactivating();
+    }
     if (['desktop', 'bitmaps', 'palette', 'pointer'].includes(value.type))
         enqueue(value);
     else {
@@ -58,7 +71,7 @@ function event(value) {
             const pixels = value.bytes || value.rgba;
             postMessage(value, [pixels.buffer]); // Clipboard decoders return owned buffers.
         } else send(value);
-        if (value.type === 'error')
+        if (value.type === 'error' || value.type === 'state' && value.state === 'closed')
             stop();
     }
 }
@@ -137,19 +150,29 @@ function start(message) {
         openSession({ ...options, password: '', bpp: 24 }, { selectedProtocol: 1, requestedProtocols: 1 });
         return;
     }
+    startup = message;
     credentials = { username: options.username || '', domain: options.domain || '', password: message.password || '' };
+    message.password = '';
+    watchdog = new ConnectionWatchdog({
+        ping: id => {
+            if (socket?.readyState !== 1) throw new Error('Gateway socket is not open');
+            socket.send(JSON.stringify({ type: 'ping', id }));
+        },
+        fail,
+        health: value => send({ type: 'connection-health', ...value }),
+    });
+    watchdogTimer = setInterval(() => {
+        try { watchdog.tick(); } catch (error) { fail(error); }
+    }, 1000);
     socket = new WebSocket(message.url);
     socket.binaryType = 'arraybuffer';
     socket.onopen = () => {
-        socket.send(JSON.stringify({ type: 'connect', inputFlowControl: true, targetId: options.targetId, security: options.security, token: message.token, ...credentials }));
-        message.token = message.password = '';
-        pingTimer = setInterval(() => {
-            if (socket.readyState !== 1 || pingTimes.size > 3)
-                return;
-            const id = Date.now();
-            pingTimes.set(id, performance.now());
-            socket.send(JSON.stringify({ type: 'ping', id }));
-        }, 5000);
+        if (stopped) return;
+        try {
+            socket.send(JSON.stringify({ type: 'connect', inputFlowControl: true, targetId: options.targetId, security: options.security, token: message.token, ...credentials }));
+            message.token = '';
+            watchdog.opened();
+        } catch (error) { fail(error); }
     };
     socket.onmessage = received => {
         if (stopped)
@@ -159,14 +182,14 @@ function start(message) {
                 const control = JSON.parse(received.data);
                 if (control.type === 'ready') {
                     if (outbound || session) throw new Error('Repeated gateway initialization');
+                    if (!watchdog.secured()) return;
                     outbound = new WireSendQueue({ window: control.inputWindow || 0, send: bytes => {
                         if (socket.readyState !== 1) throw new Error('Gateway socket is closed');
                         socket.send(bytes);
                     }, bufferedAmount: () => socket.bufferedAmount, onError: fail });
                     send({ ...control, type: 'security' });
                     openSession({ ...options, password: options.security === 'tls' ? credentials.password : '' }, control);
-                    credentials.password = '';
-                    credentials = null;
+                    clearSecrets();
                 }
                 else if (control.type === 'input-ack') {
                     if (!outbound) throw new Error('Input acknowledgement before gateway initialization');
@@ -175,11 +198,8 @@ function start(message) {
                 else if (control.type === 'error')
                     fail(control);
                 else if (control.type === 'pong') {
-                    const start = pingTimes.get(control.id);
-                    if (start !== undefined) {
-                        send({ type: 'latency', bridgeRttMs: performance.now() - start });
-                        pingTimes.delete(control.id);
-                    }
+                    if (watchdog.pong(control.id))
+                        send({ type: 'latency', bridgeRttMs: watchdog.rttMs });
                 }
                 else
                     send(control);
@@ -206,6 +226,7 @@ function start(message) {
 }
 onmessage = received => {
     const message = received.data;
+    if (stopped) return;
     try {
         if (message.type === 'start') {
             if (session || socket || stopped)

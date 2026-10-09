@@ -30,11 +30,11 @@
 | RemoteApp | Not implemented. | No RAIL, remote window mapping, shell integration or app launch protocol. |
 | RD Gateway / broker | Not implemented. | No HTTP/RPC/UDP gateway, gateway MFA, broker redirects or connection authorization policies. |
 | UDP / multitransport | Not implemented. | TCP only; no RDPUDP/FEC, transport fallback selection or network autodetection protocol. |
-| Reconnect / recovery | Explicit disconnect, error reporting, GUI renderer fallback and refresh request. | No auto-reconnect cookie/resume, network reconnect state machine or session migration. |
+| Reconnect / recovery | Independent WebSocket/security/activation deadlines, one correlated gateway heartbeat, visible health, bounded failure cleanup, and explicit reconnect with fresh credentials and target discovery. | No auto-reconnect cookie/resume, automatic credential retry or session migration. Gateway probes are not RDP-server liveness tests; suspended-worker deadlines are observed on resume. |
 | WebGPU | Compute pixel conversion, persistent desktop, cursor presentation and optional timing source exist. | No GPU adapter was available for execution. No GPU correctness/performance claim. |
 | WebGL2 | CPU conversion + dirty texture uploads + GPU presentation source exists. | Test environment could not create a context. |
 | Canvas | CPU conversion, desktop buffer and cursor composition. | Local pixel/cursor tests pass; high-resolution interactive performance not established. |
-| Desktop browsers | Modern worker/module-based UI, feature-based renderer selection. | Chromium 144 Canvas-path smoke test only. Safari/Firefox/Edge and every OS/hardware combination unqualified. |
+| Desktop browsers | Modern worker/module-based UI, feature-based renderer selection. | Chromium Canvas-path tests exercise separate gateway, TLS/NLA, clipboard, PCM and lifecycle behavior; individual CI runs record exact scope. Safari/Firefox/Edge and every OS/hardware combination unqualified. |
 | Mobile | Responsive GUI, Unicode text panel, touch-to-mouse input code. | Chromium mobile viewport tested, not physical Android/iPhone or native RDP touch. |
 | Accessibility | Semantic forms/buttons, names on session controls, focusable desktop and keyboard panel. | No remote accessibility-tree redirection, assistive-technology certification or full screen-reader audit. |
 
