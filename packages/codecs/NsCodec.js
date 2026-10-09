@@ -106,6 +106,20 @@ export function nsCodecToRgba(bitmap, destination, preserveAlpha = false) {
     const out = destination ?? new Uint8ClampedArray(width * height * 4);
     requireThat((out instanceof Uint8Array || out instanceof Uint8ClampedArray) &&
         out.length >= width * height * 4 && out.buffer !== data.buffer, 'NSC_OUTPUT', 'Invalid or aliased NSCodec output');
+    return convertNsPixels(bitmap, layout, out, false, preserveAlpha);
+}
+
+/** Canonical 0x00RRGGBB shadow pixels without an intermediate RGBA allocation.
+ * Used only when the optional GDI source-dependent blit profile is enabled. */
+export function nsCodecToXrgb(bitmap, destination) {
+    const layout = validateNsBitmap(bitmap);
+    const out = destination ?? new Uint32Array(bitmap.width * bitmap.height);
+    requireThat(out instanceof Uint32Array && out.length >= bitmap.width * bitmap.height &&
+        out.buffer !== bitmap.data.buffer, 'NSC_OUTPUT', 'Invalid or aliased NSCodec shadow output');
+    return convertNsPixels(bitmap, layout, out, true, false);
+}
+function convertNsPixels(bitmap, layout, out, packed, preserveAlpha) {
+    const { width, height, data, colorLossLevel, subsampled, bottomUp, sourceBpp, alpha } = bitmap;
     const clamp = value => Math.max(0, Math.min(255, value)), shift = colorLossLevel - 1;
     for (let y = 0, o = 0; y < height; y++) {
         const sy = bottomUp ? height - 1 - y : y;
@@ -116,9 +130,12 @@ export function nsCodecToRgba(bitmap, destination, preserveAlpha = false) {
             const cg = (data[layout.ySize + layout.cSize + i] << (shift + 24)) >> 24;
             const luma = data[sy * layout.stride + x];
             const red = clamp(luma + co - cg), blue = clamp(luma - co - cg);
-            out[o] = sourceBpp === 24 ? blue : red; out[o + 1] = clamp(luma + cg);
-            out[o + 2] = sourceBpp === 24 ? red : blue;
-            out[o + 3] = preserveAlpha && alpha ? data[layout.alphaOffset + sy * width + x] : 255;
+            const r = sourceBpp === 24 ? blue : red, g = clamp(luma + cg), b = sourceBpp === 24 ? red : blue;
+            if (packed) out[y * width + x] = r << 16 | g << 8 | b;
+            else {
+                out[o] = r; out[o + 1] = g; out[o + 2] = b;
+                out[o + 3] = preserveAlpha && alpha ? data[layout.alphaOffset + sy * width + x] : 255;
+            }
         }
     }
     return out;

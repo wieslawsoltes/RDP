@@ -2,7 +2,7 @@
 
 An independently written RDP browser client with a responsive connection workspace, a transport-independent JavaScript protocol core, WebGPU compute/presentation code, two rendering fallbacks, and a constrained Node.js TCP/TLS/CredSSP bridge.
 
-**Status: experimental bitmap-profile implementation, not a complete RDP implementation or a Windows-qualified production client.** The source is runnable and includes real packet processing, authentication code, a protocol lab, and automated tests. Unsupported capabilities are not advertised. Windows interoperability, GPU execution on physical hardware, and an independent security review remain outstanding. Read [the exact protocol matrix](docs/PROTOCOL_MATRIX.md) before connecting to a real host.
+**Status: experimental bitmap/blit-profile implementation, not a complete RDP implementation or a Windows-qualified production client.** The source is runnable and includes real packet processing, authentication code, a protocol lab, and automated tests. Unsupported capabilities are not advertised. Windows interoperability, GPU execution on physical hardware, and an independent security review remain outstanding. Read [the exact protocol matrix](docs/PROTOCOL_MATRIX.md) before connecting to a real host.
 
 ## Browser app and local gateway
 
@@ -52,6 +52,25 @@ offer, not capture permission. PCM16 mono/stereo, 8–96 kHz wire formats and bo
 FIR resampling are implemented on the reliable AUDIO_INPUT channel. Already sent
 network bytes cannot be recalled. See [microphone scope and tests](docs/changes/0012-microphone.md).
 
+
+### Experimental GDI blits and caches
+
+**GDI blits and caches** is an explicit connection
+option for matching 24/32-bit desktops. It adds DstBlt, PatBlt, ScrBlt, OpaqueRect,
+MemBlt and Mem3Blt, Revision 1/2 nonpersistent bitmap caches, cached color tables,
+and offscreen bitmaps. Field histories, clipping, source overlap and all ROP3
+truth tables are handled in the session worker. Dirty BGRA rectangles use the
+existing renderer interfaces, without GPU readback. This is CPU rasterization,
+not a GPU drawing-order implementation. Glyph/text, geometric/multi orders,
+cached brushes and persistent bitmap caches are not advertised. See
+[scope, bounds and validation](docs/changes/0013-gdi-blits.md).
+
+Surface graphics and GDI can be enabled together. Packed NSCodec planes update
+the CPU shadow before transfer; GDI/bitmap updates inside a marked surface frame
+remain atomic and share its presentation receipt. Equal-size reactivation resets
+the primary surface consistently across all renderers. The original unpublished
+GDI checkpoint was recovered and integrated with the newer surface-graphics code;
+current CI and PR records supersede its historical local-only validation report.
 
 ## Run the application
 
@@ -117,14 +136,14 @@ The browser-to-bridge HTTPS certificate and bridge-to-RDP certificate are separa
 | Workspace | Session tabs, saved metadata profiles, target loading, dark/light themes, responsive layout, desktop fit/native size, screenshots, fullscreen request, diagnostics and error states. |
 | Security transport | Original RFC 6455 bridge transport; TCP, X.224 negotiation, verified TLS, CredSSP 5/6 with NTLMv2, MIC, channel binding, directional signing/sealing, and server binding verification before credential delegation. |
 | Session core | Bounds-checked TPKT/fast-path framing, BER/PER/GCC/MCS, joins, activation/reactivation, selected Share Control/Data PDUs, bitmap updates, palette and pointer caches. |
-| Graphics | Uncompressed 8/15/16/24/32-bit bitmap decoding; interleaved RLE for 8/15/16/24-bit pixels; bottom-up/padded rows; overlapping update ordering; RDP6 planar 32-bit bitmap decoding; classic AND/XOR and 32-bit alpha pointers up to 384×384; opt-in raw/NSCodec Set/Stream Surface Bits with atomic marked frames and renderer-completion acknowledgements. |
+| Graphics | Opt-in 24/32-bit GDI blits, Revision 1/2 bitmap/color caches and bounded offscreen surfaces; uncompressed 8/15/16/24/32-bit bitmap decoding; interleaved RLE for 8/15/16/24-bit pixels; bottom-up/padded rows; overlapping update ordering; RDP6 planar 32-bit bitmap decoding; classic AND/XOR and 32-bit alpha pointers up to 384×384; opt-in raw/NSCodec Set/Stream Surface Bits with atomic marked frames and renderer-completion acknowledgements. |
 | Renderers | WGSL packed-pixel and NSCodec plane conversion into a persistent RGBA desktop texture and GPU cursor presentation; WebGL2 fallback with CPU pixel conversion; Canvas 2D fallback. GPU implementations have not been runtime-validated in the supplied environment. |
 | Input | Scan-code keys, Unicode UTF-16 input, mouse and wheel, extra mouse buttons, shortcut controls, release-on-blur, pointer capture, touch/pen mapped to mouse. Native RDP multitouch/pen is not implemented. |
 | Clipboard | Unicode text and opt-in HTML/PNG/DIB/DIBV5 over `cliprdr`; explicit OS clipboard actions, serialized requests, ownership generations and bounded snapshots. No file streaming. |
 | Display control | Reliable dynamic channels, initial and dynamic 1–16-monitor topology, and server-driven reactivation on one spanning canvas. No physical multi-window display placement. |
 | Diagnostics | Measured packet/byte/bitmap counters, renderer submission cost, presented-frame rate, optional GPU timestamps when available, bridge-only RTT, downloadable reports. |
 
-Webcams, drive/USB/printer/smart-card redirection, RemoteApp, Microsoft RD Gateway, UDP/multitransport, RDPGFX/RemoteFX/video codecs, general drawing orders, and licensing beyond the documented profile are **not implemented**. Opt-in PCM sound output/input, NSCodec surface graphics and gateway-managed CAL exchange are implemented. See [surface graphics](docs/changes/0014-surface-graphics.md) for frame ordering and quality settings. The complete distinctions are in [PROTOCOL_MATRIX.md](docs/PROTOCOL_MATRIX.md).
+Webcams, drive/USB/printer/smart-card redirection, RemoteApp, Microsoft RD Gateway, UDP/multitransport, RDPGFX/RemoteFX/video codecs, geometric/text/multi drawing orders, and licensing beyond the documented profile are **not implemented**. Opt-in PCM sound output/input, NSCodec surface graphics and gateway-managed CAL exchange are implemented. See [surface graphics](docs/changes/0014-surface-graphics.md) for frame ordering and quality settings. The complete distinctions are in [PROTOCOL_MATRIX.md](docs/PROTOCOL_MATRIX.md).
 
 ## Architecture
 

@@ -65,3 +65,26 @@ or dropped, and cleared; resampler partial data is cleared on pause, transport
 failure and format changes. Track revocation, hidden-session/page, channel close
 and disconnect stop the device. In-flight protocol bytes already handed to the
 network cannot be recalled. The test WAV is synthetic, not physical ambient audio.
+
+
+## Experimental GDI order profile
+
+Drawing orders are opt-in and processed inside the session worker, not the
+credential-handling gateway. Dimensions, field masks, order classes, cache IDs,
+indices, source reads, lengths, brush styles and output budgets are checked.
+Each update permits at most 4096 orders and 64 Mi pixel-work units; cache decode
+and indexed-palette expansion consume that budget too. There is no dynamic code
+generation. Unsupported stateful orders terminate rather than desynchronize the
+session. The renderer receives owned dirty-pixel buffers, never cache aliases.
+
+Closing or failing wipes canonical surfaces and caches, and untransferred render
+queue payloads are cleared. Pixels already transferred to the renderer cannot be
+recalled; its existing lifecycle owns them. A browser screenshot or remote-server
+recording is outside this cleanup guarantee. JavaScript zeroing is best effort,
+not a cryptographic erasure guarantee across engine/OS copies.
+
+This addition is tested with synthetic and co-developed peers. The combined
+GDI/surface-frame browser suite runs in ordinary GitHub-hosted Chromium. Each
+PR records the final source and browser results; historical local-only results
+are not evidence for new source. No security policy is disabled. Passing those
+tests does not establish independent Windows or physical hardware qualification.

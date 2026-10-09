@@ -13,7 +13,7 @@ const clear = rectangles => { for (const r of rectangles) if (r.data.byteLength)
  * until the host reports presentation of the exact emitted item.
  */
 export class SurfaceCommands {
-    constructor({ desktop, profile, emit, acknowledge = () => {}, nextToken = (() => { let n = 0; return () => ++n; })(),
+    constructor({ desktop, profile, emit, observe = () => {}, acknowledge = () => {}, nextToken = (() => { let n = 0; return () => ++n; })(),
         now = () => performance.now(), frameTimeoutMs = 15000 }) {
         requireThat(desktop && Number.isInteger(desktop.width) && desktop.width > 0 && desktop.width <= 8192 &&
             Number.isInteger(desktop.height) && desktop.height > 0 && desktop.height <= 8192 && desktop.width * desktop.height <= 16777216,
@@ -21,7 +21,7 @@ export class SurfaceCommands {
         requireThat(Number.isInteger(frameTimeoutMs) && frameTimeoutMs >= 1 && frameTimeoutMs <= 60000,
             'SURFACE_TIMEOUT', 'Invalid surface frame timeout');
         this.desktop = { ...desktop }; this.profile = { ...profile }; this.emit = emit; this.acknowledge = acknowledge;
-        this.nextToken = nextToken; this.now = now; this.frameTimeoutMs = frameTimeoutMs;
+        this.observe = observe; this.nextToken = nextToken; this.now = now; this.frameTimeoutMs = frameTimeoutMs;
         this.current = null; this.pending = new Map(); this.closed = false;
         this.frames = this.decodedBytes = this.acknowledged = 0;
     }
@@ -90,15 +90,16 @@ export class SurfaceCommands {
             }
         } catch (error) { this.close(); throw error; }
     }
-    addBitmap(bitmap) {
+    addBitmap(bitmap, observe = true) {
         requireThat(!this.closed, 'SURFACE_CLOSED', 'Surface decoder is closed');
         this.decodedBytes += bitmap.data.length;
         if (this.current) {
             const size = Math.max(bitmap.data.length, bitmap.width * bitmap.height * 4);
             requireThat(this.current.rectangles.length < MAX_RECTANGLES && this.current.bytes + size <= MAX_FRAME_BYTES,
                 'SURFACE_BUDGET', 'Marked surface frame exceeds its memory/rectangle budget');
+            if (observe) this.observe(bitmap);
             this.current.rectangles.push(bitmap); this.current.bytes += size;
-        } else this.deliver([bitmap]);
+        } else { if (observe) this.observe(bitmap); this.deliver([bitmap]); }
     }
     deliver(rectangles, frameId = null) {
         let token = null;
@@ -121,6 +122,6 @@ export class SurfaceCommands {
         bufferedFrameBytes: this.current?.bytes || 0, acknowledged: this.acknowledged }; }
     close() {
         this.closed = true; if (this.current) clear(this.current.rectangles);
-        this.current = null; this.pending.clear();
+        this.current = null; this.pending.clear(); this.observe = () => {};
     }
 }

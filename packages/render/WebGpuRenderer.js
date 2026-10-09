@@ -98,8 +98,9 @@ export class WebGpuRenderer {
     }
     resize(width, height) {
         requireThat(Number.isInteger(width) && Number.isInteger(height) && width > 0 && height > 0 && width <= this.device.limits.maxTextureDimension2D && height <= this.device.limits.maxTextureDimension2D && width * height <= 16777216, 'GPU_DESKTOP_LIMIT', 'Desktop exceeds GPU limits');
-        if (this.width === width && this.height === height)
-            return;
+        // A desktop event is a new activation epoch, even at unchanged dimensions.
+        // Reset like Canvas/WebGL and the CPU GDI shadow; stale GPU pixels must
+        // not disagree with source-dependent screen blits after reactivation.
         const old = this.surface;
         this.width = this.canvas.width = width;
         this.height = this.canvas.height = height;

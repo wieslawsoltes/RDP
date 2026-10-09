@@ -18,6 +18,10 @@ function clearSecrets() {
     if (startup) startup.password = startup.token = '';
     credentials = startup = null;
 }
+function releaseRenderEvent(value) {
+    const views = ['bitmaps', 'surface-frame'].includes(value.type) ? value.rectangles.map(r => r.data) : value.type === 'palette' ? [value.palette] : value.shape ? [value.shape.pixels] : [];
+    for (const view of views) if (view?.byteLength) view.fill(0);
+}
 function stop() {
     if (stopped) return;
     stopped = true;
@@ -35,10 +39,7 @@ function stop() {
         try { if (socket.readyState === 1) socket.send(JSON.stringify({ type: 'disconnect' })); } catch { /* Socket failed. */ }
         try { socket.close(); } catch { /* Already closing. */ }
     }
-    for (const { event } of queue) {
-        for (const r of event.rectangles || []) if (r.data.byteLength) r.data.fill(0);
-        event.palette?.fill(0); event.shape?.pixels?.fill(0);
-    }
+    for (const item of queue) releaseRenderEvent(item.event);
     queue = [];
     queuedBytes = wireCredit = 0;
     inflight.clear();
@@ -54,8 +55,10 @@ function enqueue(event) {
         event = { ...event, shape: { ...event.shape, pixels: event.shape.pixels.slice() } };
         size = event.shape.pixels.byteLength;
     }
-    if (queuedBytes + size > 64 * 1024 * 1024 || queue.length >= 8192)
+    if (queuedBytes + size > 64 * 1024 * 1024 || queue.length >= 8192) {
+        releaseRenderEvent(event);
         throw new Error('Decoded render queue exceeded its memory budget');
+    }
     queue.push({ event, size });
     queuedBytes += size;
     scheduleFlush();

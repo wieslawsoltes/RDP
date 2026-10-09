@@ -1,13 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Worker } from 'node:worker_threads';
+import { expectedNsPixel } from './fixtures/SurfacePeer.js';
 import { once } from 'node:events';
-async function harness(t){
+async function harness(t,orders=false){
     const worker=new Worker(new URL('./fixtures/WorkerSurfaceHarness.js',import.meta.url));t.after(()=>worker.terminate());
     assert.equal((await once(worker,'message'))[0].ready,true);let next=0;
     const call=async(op,value)=>{const promise=once(worker,'message'),id=++next;worker.postMessage({id,op,value});
         const [r]=await promise;assert.equal(r.id,id);assert.equal(r.error,undefined,r.error);return r;};
-    const first=await call('start');assert.ok(first.events.some(e=>e.type==='state'&&e.state==='active'));return call;
+    const first=await call('start',orders);assert.ok(first.events.some(e=>e.type==='state'&&e.state==='active'));return call;
 }
 test('Actual worker transfers packed NSCodec once and sends RDP frame ACK only on a matching UI receipt',{timeout:5000},async t=>{
     const call=await harness(t);await call('hold',true);const r=await call('frame',700);
@@ -39,4 +40,13 @@ test('Actual worker unfinished surface deadline closes transport and invalidates
     assert.ok(expired.events.some(e=>e.type==='error'&&e.code==='SURFACE_FRAME_TIMEOUT'));
     assert.equal(expired.timers,0);assert.equal(expired.closes,1);assert.deepEqual(expired.acks,[]);
     assert.deepEqual((await call('receipt',19)).acks,[]);
+});
+
+test('Actual worker mirrors NSCodec before transferring planes so subsequent GDI screen blits remain exact', {timeout:5000}, async t=>{
+    const call=await harness(t,true);const first=await call('frame',7);
+    assert.deepEqual(first.acks,[7]);assert.equal(first.transferred,1);
+    const copy=await call('copy');
+    const rect=copy.events.filter(e=>e.type==='render').flatMap(e=>e.commands).find(c=>c.type==='bitmaps');
+    assert.ok(rect);assert.deepEqual(rect.firstPixel,expectedNsPixel(0,0,{width:71,height:15}));
+    assert.equal(copy.events.some(e=>e.type==='error'),false);await call('close');
 });
