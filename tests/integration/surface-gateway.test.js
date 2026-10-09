@@ -60,6 +60,27 @@ test('NSCodec frames and exact ACKs traverse the actual WS/TCP/TLS/CredSSP gatew
     const frame=events.find(e=>e.type==='surface-frame'),rgba=toRgba(frame.rectangles[0]);
     for(let y=0;y<5;y++)for(let x=0;x<7;x++)assert.deepEqual([...rgba.subarray((y*7+x)*4,(y*7+x+1)*4)],expectedNsPixel(x,y));
     assert.deepEqual(state.acks,[]);session.presentSurface(frame.token);await until(()=>state.acks.length===1);assert.deepEqual(state.acks,[71]);
+    // Cross the actual TLS/NLA gateway again rather than treating an in-process
+    // reactivation as sufficient. A old render token must not ACK a new epoch.
+    peer.surface(concat(surfaceMarker(0,72),surfaceBits(),surfaceMarker(1,72)));
+    await until(()=>events.filter(e=>e.type==='surface-frame').length===2);
+    const stale=events.filter(e=>e.type==='surface-frame')[1].token;
+    const previousEvents=events.length;
+    peer.reactivateSurface();
+    await until(()=>events.slice(previousEvents).some(e=>e.type==='state'&&e.state==='active'));
+    assert.equal(state.confirms,2);
+    assert.ok(events.slice(previousEvents).some(e=>e.type==='state'&&e.state==='reactivating'));
+    assert.equal(session.presentSurface(stale),false);
+    let receivedInput=false;
+    const previousInput=peer.onInput;
+    peer.onInput=list=>{previousInput(list);if(list.some(e=>e.type===4&&e.a===0x30))receivedInput=true;peer.advertiseClipboard();};
+    session.input([{type:'key',code:0x30}]);
+    await until(()=>receivedInput);
+    peer.surface(concat(surfaceMarker(0,73),surfaceBits(),surfaceMarker(1,73)));
+    await until(()=>events.filter(e=>e.type==='surface-frame').length===3);
+    const resumed=events.filter(e=>e.type==='surface-frame')[2];
+    assert.notEqual(resumed.token,stale);session.presentSurface(resumed.token);
+    await until(()=>state.acks.length===2);assert.deepEqual(state.acks,[71,73]);
     assert.equal(remote.errors.length,0);assert.equal(remote.credentialRecords[0].passwordVerified,true);
 });
 

@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 PROBE = r"""async () => {
     const {CanvasRenderer} = await import('/RDP/packages/render/CanvasRenderer.js');
     const original = CanvasRenderer.prototype.whenComplete, apply = CanvasRenderer.prototype.apply;
-    const p = globalThis.surfaceProbe = {hold:false,gates:[],groups:[],received:0,receipts:0};
+    const p = globalThis.surfaceProbe = {hold:false,gates:[],groups:[],received:0,receipts:0,activeCount:0,states:[],errors:[]};
     CanvasRenderer.prototype.apply = function(rects) {p.groups.push(rects.map(r=>r.encoding||'raw'));return apply.call(this,rects);};
     CanvasRenderer.prototype.whenComplete = function(signal) {
         if(!p.hold)return original.call(this,signal);
@@ -31,6 +31,8 @@ PROBE = r"""async () => {
     Worker.prototype.postMessage=function(m,...rest){
         if(!observed.has(this)){observed.add(this);this.addEventListener('message',({data})=>{
             if(data.type==='frame')for(const c of data.commands)if(c.type==='surface-frame')p.received++;
+            if(data.type==='state'){p.states.push(data.state);if(data.state==='active')p.activeCount++;}
+            if(data.type==='error')p.errors.push({code:data.code,message:data.message});
         });}
         if(m.type==='frame-ack')p.receipts++;
         return post.call(this,m,...rest);
@@ -115,7 +117,7 @@ def main() -> None:
                         def barrier() -> dict:
                             n=output().count('SURFACE_BARRIER ');canvas.focus();canvas.press('b');deadline=time.monotonic()+10
                             while output().count('SURFACE_BARRIER ')<=n:
-                                if time.monotonic()>deadline:raise AssertionError(output())
+                                if time.monotonic()>deadline:raise AssertionError({'log':output(),'probe':page.evaluate('()=>surfaceProbe'),'overlay':page.locator('.session-overlay').inner_text(),'pageErrors':errors})
                                 page.wait_for_timeout(20)
                             return json.loads(output().split('SURFACE_BARRIER ')[-1].splitlines()[0])
                         def wait_for(predicate) -> dict:
@@ -148,7 +150,14 @@ def main() -> None:
                         compare_tile();canvas.press('f');wait_for(lambda v:v['acks']==[101,102]);compare_tile(True,True)
                         assert page.evaluate('()=>surfaceProbe.groups.some(g=>g.length===2&&g[0]==="nscodec"&&g[1]==="raw")')
                         canvas.press('l');wait_for(lambda v:v['acks']==[101,102,103]);assert pixel(100,100)==[60,50,40,255]
-                        canvas.press('r');wait_for(lambda v:v['confirms']==2)
+                        # Input sent during reactivation is intentionally discarded by Session.
+                        # Await a NEW active transition before sending the keyboard barrier;
+                        # old visible 'active' text or Confirm Active alone is not sufficient.
+                        active_count=page.evaluate('()=>surfaceProbe.activeCount')
+                        canvas.press('r')
+                        page.wait_for_function('(n)=>surfaceProbe.activeCount===n+1',arg=active_count,timeout=15000)
+                        assert page.evaluate('()=>surfaceProbe.states.includes("reactivating")')
+                        wait_for(lambda v:v['confirms']==2)
                         page.wait_for_function('()=>{const p=document.querySelector(".screen-host canvas").getContext("2d").getImageData(4,5,1,1).data;return p[0]===3&&p[1]===2&&p[2]===1;}')
                         assert pixel(4,5)==[3,2,1,255]
                         canvas.press('e');wait_for(lambda v:v['acks']==[101,102,103,201]);compare_tile()
