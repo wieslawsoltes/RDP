@@ -26,3 +26,5 @@ jobs:
           /tmp/rdp-browser/bin/python -m playwright install --with-deps chromium
       - name: Exercise subpath build and separate local gateway in Chromium
         run: /tmp/rdp-browser/bin/python tools/browser-gateway-tests.py
+      - name: Compare maximum cursor rendering pixel for pixel in Chromium
+        run: /tmp/rdp-browser/bin/python tools/browser-pointer-tests.py
