@@ -42,9 +42,10 @@ export class BridgeSession {
             return;
         if (binary) {
             requireThat(this.state === 'streaming' && value.length > 0 && value.length <= 65536, 'BRIDGE_STATE', 'Binary RDP traffic before security negotiation or packet too large');
-            const packets = this.licensing.client(value);
-            const total = packets.reduce((sum, packet) => sum + packet.length, 0);
+            let packets = [];
             try {
+                packets = this.licensing.client(value);
+                const total = packets.reduce((sum, packet) => sum + packet.length, 0);
                 requireThat(this.remote.writableLength + total <= 1024 * 1024, 'BACKPRESSURE', 'Server is not accepting client input');
                 if (this.inputFlowControl) {
                     requireThat(this.inputOutstanding + value.length <= this.inputWindow, 'FLOW_CONTROL', 'Gateway input credit exceeded');

@@ -112,7 +112,8 @@ export class GatewayLicensing {
                     else await this.inspectServer(packet, kind);
                 } finally { packet.fill(0); }
             }
-        } finally {
+        } catch (error) { this.terminate(error); }
+        finally {
             this.busy = false;
             if (!this.closed) this.resume();
         }

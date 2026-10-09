@@ -6,7 +6,7 @@ import { connectionRequest, parseConnectionConfirm } from '../protocol/X224.js';
 import { SocketReader, writeSocket } from './SocketReader.js';
 import { validatePeerCertificate } from '../security/Certificate.js';
 import { authenticateCredSsp } from '../security/CredSsp.js';
-/** Owns TCP/TLS and NLA only. The browser owns all post-authentication RDP state. */
+/** Owns TCP/TLS and NLA only. The caller supplies post-authentication licensing and RDP state. */
 export async function openRdpConnection(target, credentials, { security = 'nla', signal, onStage = () => { } } = {}) {
     requireThat(security === 'nla' || (security === 'tls' && target.allowTlsOnly), 'SECURITY_POLICY', 'TLS-only logon is disabled for this target; use NLA');
     const requestedProtocols = security === 'nla' ? 2 : 1;

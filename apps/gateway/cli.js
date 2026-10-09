@@ -1,12 +1,28 @@
 #!/usr/bin/env node
 import { parseArgs } from 'node:util';
-import { mkdir, readFile, writeFile, stat } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, stat, realpath } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
-import { resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { resolve, sep } from 'node:path';
+import { pathToFileURL, fileURLToPath } from 'node:url';
 import { createBridge } from '../bridge/server.js';
 import { openLicenseStore } from './LicenseStore.js';
 import { loadTargets } from '../bridge/Targets.js';
+
+/** Keep persistent secrets outside every tree served as browser source. */
+export async function privateLicenseDirectory(value) {
+    const directory = resolve(value), root = await realpath(fileURLToPath(new URL('../../', import.meta.url)));
+    const publicRoots = [resolve(root, 'apps/client'), resolve(root, 'packages'), resolve(root, 'dist')];
+    const canonicalCase = path => process.platform === 'win32' ? path.toLowerCase() : path;
+    const check = path => {
+        path = canonicalCase(path);
+        if (publicRoots.map(canonicalCase).some(base => path === base || path.startsWith(base + sep)))
+            throw new Error('License directory must be outside browser/public source and build directories');
+    };
+    check(directory);
+    await mkdir(directory, { recursive: true, mode: 0o700 });
+    check(await realpath(directory));
+    return directory;
+}
 
 export async function runGateway(args = process.argv.slice(2), log = console.log) {
     const { values, positionals } = parseArgs({ args, allowPositionals: true, strict: true, options: {
@@ -43,7 +59,7 @@ export async function runGateway(args = process.argv.slice(2), log = console.log
         token = (await readFile(file, 'utf8')).trim();
     }
     const tlsOptions = values['https-cert'] ? { cert: await readFile(values['https-cert']), key: await readFile(values['https-key']) } : undefined;
-    const licenseDir = resolve(values['license-dir'] || resolve(dir, 'licenses'));
+    const licenseDir = await privateLicenseDirectory(values['license-dir'] || resolve(dir, 'licenses'));
     const licenseStore = await openLicenseStore(licenseDir);
     let bridge;
     try { bridge = await createBridge({ host: values.host, port, token, targets, tlsOptions,
