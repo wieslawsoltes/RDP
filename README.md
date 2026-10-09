@@ -117,14 +117,14 @@ The browser-to-bridge HTTPS certificate and bridge-to-RDP certificate are separa
 | Workspace | Session tabs, saved metadata profiles, target loading, dark/light themes, responsive layout, desktop fit/native size, screenshots, fullscreen request, diagnostics and error states. |
 | Security transport | Original RFC 6455 bridge transport; TCP, X.224 negotiation, verified TLS, CredSSP 5/6 with NTLMv2, MIC, channel binding, directional signing/sealing, and server binding verification before credential delegation. |
 | Session core | Bounds-checked TPKT/fast-path framing, BER/PER/GCC/MCS, joins, activation/reactivation, selected Share Control/Data PDUs, bitmap updates, palette and pointer caches. |
-| Graphics | Uncompressed 8/15/16/24/32-bit bitmap decoding; interleaved RLE for 8/15/16/24-bit pixels; bottom-up/padded rows; overlapping update ordering; RDP6 planar 32-bit bitmap decoding; classic AND/XOR and 32-bit alpha pointers up to 384×384. |
-| Renderers | WGSL packed-pixel conversion into a persistent RGBA desktop texture and GPU cursor presentation; WebGL2 fallback with CPU pixel conversion; Canvas 2D fallback. GPU implementations have not been runtime-validated in the supplied environment. |
+| Graphics | Uncompressed 8/15/16/24/32-bit bitmap decoding; interleaved RLE for 8/15/16/24-bit pixels; bottom-up/padded rows; overlapping update ordering; RDP6 planar 32-bit bitmap decoding; classic AND/XOR and 32-bit alpha pointers up to 384×384; opt-in raw/NSCodec Set/Stream Surface Bits with atomic marked frames and renderer-completion acknowledgements. |
+| Renderers | WGSL packed-pixel and NSCodec plane conversion into a persistent RGBA desktop texture and GPU cursor presentation; WebGL2 fallback with CPU pixel conversion; Canvas 2D fallback. GPU implementations have not been runtime-validated in the supplied environment. |
 | Input | Scan-code keys, Unicode UTF-16 input, mouse and wheel, extra mouse buttons, shortcut controls, release-on-blur, pointer capture, touch/pen mapped to mouse. Native RDP multitouch/pen is not implemented. |
 | Clipboard | Unicode text and opt-in HTML/PNG/DIB/DIBV5 over `cliprdr`; explicit OS clipboard actions, serialized requests, ownership generations and bounded snapshots. No file streaming. |
-| Display control | Reliable dynamic channels and one-primary-monitor resize through the display-control channel and server reactivation. No multi-monitor layout. |
+| Display control | Reliable dynamic channels, initial and dynamic 1–16-monitor topology, and server-driven reactivation on one spanning canvas. No physical multi-window display placement. |
 | Diagnostics | Measured packet/byte/bitmap counters, renderer submission cost, presented-frame rate, optional GPU timestamps when available, bridge-only RTT, downloadable reports. |
 
-Webcams, drive/USB/printer/smart-card redirection, RemoteApp, Microsoft RD Gateway, UDP/multitransport, advanced graphics codecs, general drawing orders, and licensing beyond the documented profile are **not implemented**. Opt-in PCM sound output/input and gateway-managed CAL exchange are implemented. The complete distinctions are in [PROTOCOL_MATRIX.md](docs/PROTOCOL_MATRIX.md).
+Webcams, drive/USB/printer/smart-card redirection, RemoteApp, Microsoft RD Gateway, UDP/multitransport, RDPGFX/RemoteFX/video codecs, general drawing orders, and licensing beyond the documented profile are **not implemented**. Opt-in PCM sound output/input, NSCodec surface graphics and gateway-managed CAL exchange are implemented. See [surface graphics](docs/changes/0014-surface-graphics.md) for frame ordering and quality settings. The complete distinctions are in [PROTOCOL_MATRIX.md](docs/PROTOCOL_MATRIX.md).
 
 ## Architecture
 

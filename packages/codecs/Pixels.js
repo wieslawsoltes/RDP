@@ -1,5 +1,8 @@
+import { validateNsBitmap, nsCodecToRgba } from './NsCodec.js';
 import { requireThat, checkedSize } from '../binary/ProtocolError.js';
 export function validateBitmap(b) {
+    if (b.encoding === 'nscodec') { validateNsBitmap(b); return 4; }
+    requireThat(b.encoding === undefined, 'BITMAP_ENCODING', 'Unknown bitmap encoding');
     requireThat(Number.isInteger(b.width) && Number.isInteger(b.height) && b.width > 0 && b.height > 0 && b.width <= 8192 && b.height <= 8192, 'BITMAP_SIZE', 'Invalid bitmap dimensions');
     checkedSize(b.width * b.height, 16777216, 'Bitmap pixels');
     requireThat([8, 15, 16, 24, 32].includes(b.bpp), 'BITMAP_BPP', 'Unsupported bitmap color depth');
@@ -10,6 +13,7 @@ export function validateBitmap(b) {
 }
 /** CPU oracle and fallback. GPU conversion uses the same descriptor semantics. */
 export function toRgba(bitmap, palette, destination) {
+    if (bitmap.encoding === 'nscodec') return nsCodecToRgba(bitmap, destination);
     const bytesPerPixel = validateBitmap(bitmap), { width, height, stride, data, bpp, bottomUp = true } = bitmap;
     const out = destination ?? new Uint8ClampedArray(width * height * 4);
     requireThat(out.length >= width * height * 4, 'PIXEL_BUFFER', 'Pixel output buffer is too small');

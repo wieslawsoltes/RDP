@@ -1,8 +1,9 @@
+import { surfaceCapabilityBodies } from './SurfaceCapabilities.js';
 import { Reader } from '../binary/Reader.js';
 import { Writer, concat } from '../binary/Writer.js';
 import { requireThat } from '../binary/ProtocolError.js';
 export const capability = (type, body) => new Writer(body.length + 4).u16le(type).u16le(body.length + 4).put(body).finish();
-export function clientCapabilities({ width, height, bpp = 24, keyboardLayout = 0x409, compression = true }) {
+export function clientCapabilities({ width, height, bpp = 24, keyboardLayout = 0x409, compression = true, surfaceProfile }) {
     const general = new Writer().u16le(4).u16le(0).u16le(0x200).u16le(0).u16le(0)
         .u16le(0x405).u16le(0).u16le(0).u16le(0).u8(1).u8(1).finish();
     const bitmap = new Writer().u16le(bpp).u16le(1).u16le(1).u16le(1).u16le(width).u16le(height)
@@ -20,7 +21,8 @@ export function clientCapabilities({ width, height, bpp = 24, keyboardLayout = 0
         capability(12, new Writer().u16le(1).u16le(0).finish()),
         capability(20, new Writer().u32le(compression ? 1 : 0).u32le(1600).finish()),
         capability(26, new Writer().u32le(16 * 1024 * 1024).finish()),
-        capability(27, new Writer().u16le(3).finish())];
+        capability(27, new Writer().u16le(3).finish()),
+        ...surfaceCapabilityBodies(surfaceProfile).map(([type, body]) => capability(type, body))];
 }
 export function parseDemandActive(body) {
     const r = new Reader(body), shareId = r.u32le(), sourceLength = r.u16le(), capsLength = r.u16le();

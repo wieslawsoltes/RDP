@@ -2,7 +2,7 @@ export const bitmapComputeWgsl = /* wgsl */ `
 struct Job {
   dataOffset: u32, stride: u32, width: u32, height: u32,
   bpp: u32, bottomUp: u32, dstX: u32, dstY: u32,
-  drawWidth: u32, drawHeight: u32, pad0: u32, pad1: u32,
+  drawWidth: u32, drawHeight: u32, encoding: u32, codecFlags: u32,
 };
 struct Batch { first: u32, count: u32, pad0: u32, pad1: u32 };
 @group(0) @binding(0) var<storage, read> packed: array<u32>;
@@ -20,7 +20,20 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
   let row = select(id.y, job.height - 1u - id.y, job.bottomUp != 0u);
   let offset = job.dataOffset + row * job.stride + id.x * ((job.bpp + 7u) >> 3u);
   var rgb: vec3<u32>;
-  if (job.bpp == 8u) {
+  if (job.encoding == 1u) {
+    let sub = (job.codecFlags & 1u) != 0u;
+    let ySize = job.stride * job.height;
+    let cStride = select(job.width, job.stride / 2u, sub);
+    let cHeight = select(job.height, (job.height + 1u) / 2u, sub);
+    let cIndex = select(row, row / 2u, sub) * cStride + select(id.x, id.x / 2u, sub);
+    let shift = ((job.codecFlags >> 8u) & 7u) + 23u;
+    let co = bitcast<i32>(byteAt(job.dataOffset + ySize + cIndex) << shift) >> 24u;
+    let cg = bitcast<i32>(byteAt(job.dataOffset + ySize + cStride * cHeight + cIndex) << shift) >> 24u;
+    let luma = i32(byteAt(job.dataOffset + row * job.stride + id.x));
+    var color = clamp(vec3<i32>(luma + co - cg, luma + cg, luma - co - cg), vec3<i32>(0), vec3<i32>(255));
+    if ((job.codecFlags & 2u) != 0u) { color = color.bgr; }
+    rgb = vec3<u32>(color);
+  } else if (job.bpp == 8u) {
     let c = palette[byteAt(offset)]; rgb = vec3<u32>(c & 255u, (c >> 8u) & 255u, (c >> 16u) & 255u);
   } else if (job.bpp == 15u || job.bpp == 16u) {
     let p = byteAt(offset) | (byteAt(offset + 1u) << 8u);

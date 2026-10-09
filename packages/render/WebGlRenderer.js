@@ -6,7 +6,7 @@ import { requireThat } from '../binary/ProtocolError.js';
 export class WebGlRenderer {
     static async create(canvas, options) { return new WebGlRenderer(canvas, options); }
     constructor(canvas, { onLost = () => { } } = {}) {
-        this.canvas = canvas;
+        this.canvas = canvas; this.completions = new Set();
         this.gl = canvas.getContext('webgl2', { alpha: false, antialias: false, depth: false, stencil: false, preserveDrawingBuffer: true, powerPreference: 'high-performance' });
         requireThat(this.gl, 'WEBGL_UNAVAILABLE', 'WebGL2 is unavailable');
         const gl = this.gl;
@@ -90,6 +90,34 @@ export class WebGlRenderer {
         gl.drawArrays(gl.TRIANGLES, 0, 3);
         this.stats.frames++;
     }
+    whenComplete(signal) {
+        const gl = this.gl;
+        requireThat(!this.destroyed && !gl.isContextLost(), 'WEBGL_CLOSED', 'WebGL renderer is unavailable');
+        const sync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+        requireThat(sync, 'WEBGL_FENCE', 'Could not create a render-completion fence'); gl.flush();
+        return new Promise((resolve, reject) => {
+            let timer, settled = false;
+            const finish = error => {
+                if (settled) return; settled = true; clearTimeout(timer); gl.deleteSync(sync);
+                signal?.removeEventListener('abort', aborted); this.completions.delete(cancel);
+                if (error) reject(error); else resolve();
+            };
+            const cancel = () => finish(new Error('WebGL renderer closed before presentation'));
+            const aborted = () => finish(signal.reason || new Error('Presentation cancelled'));
+            this.completions.add(cancel); signal?.addEventListener('abort', aborted, { once: true });
+            const poll = () => {
+                try {
+                    if (signal?.aborted) { aborted(); return; }
+                    if (this.destroyed || gl.isContextLost()) { cancel(); return; }
+                    const status = gl.clientWaitSync(sync, 0, 0);
+                    if (status === gl.ALREADY_SIGNALED || status === gl.CONDITION_SATISFIED) finish();
+                    else if (status === gl.TIMEOUT_EXPIRED) timer = setTimeout(poll, 4);
+                    else finish(new Error('WebGL presentation fence failed'));
+                } catch (error) { finish(error); }
+            };
+            poll();
+        });
+    }
     async readSurface() {
         const gl = this.gl, framebuffer = gl.createFramebuffer();
         gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
@@ -100,5 +128,5 @@ export class WebGlRenderer {
         gl.deleteFramebuffer(framebuffer);
         return result;
     }
-    destroy() { this.destroyed = true; const gl = this.gl; gl.deleteTexture(this.surface); gl.deleteTexture(this.cursorTexture); gl.deleteProgram(this.program); gl.getExtension('WEBGL_lose_context')?.loseContext(); }
+    destroy() { this.destroyed = true; for (const cancel of this.completions) cancel(); const gl = this.gl; gl.deleteTexture(this.surface); gl.deleteTexture(this.cursorTexture); gl.deleteProgram(this.program); gl.getExtension('WEBGL_lose_context')?.loseContext(); }
 }

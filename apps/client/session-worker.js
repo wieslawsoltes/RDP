@@ -35,13 +35,17 @@ function stop() {
         try { if (socket.readyState === 1) socket.send(JSON.stringify({ type: 'disconnect' })); } catch { /* Socket failed. */ }
         try { socket.close(); } catch { /* Already closing. */ }
     }
+    for (const { event } of queue) {
+        for (const r of event.rectangles || []) if (r.data.byteLength) r.data.fill(0);
+        event.palette?.fill(0); event.shape?.pixels?.fill(0);
+    }
     queue = [];
     queuedBytes = wireCredit = 0;
     inflight.clear();
 }
 function enqueue(event) {
     let size = 0;
-    if (event.type === 'bitmaps')
+    if (event.type === 'bitmaps' || event.type === 'surface-frame')
         for (const rectangle of event.rectangles)
             size += rectangle.data.byteLength;
     else if (event.type === 'palette')
@@ -62,7 +66,7 @@ function event(value) {
         if (value.state === 'active' && !watchdog.activated()) return;
         if (value.state === 'reactivating') watchdog.reactivating();
     }
-    if (['desktop', 'bitmaps', 'palette', 'pointer'].includes(value.type))
+    if (['desktop', 'bitmaps', 'surface-frame', 'palette', 'pointer'].includes(value.type))
         enqueue(value);
     else {
         if (value.type === 'audio' && value.kind === 'samples') {
@@ -97,7 +101,7 @@ function flush() {
         size += item.size;
         queuedBytes -= item.size;
         commands.push(item.event);
-        const views = item.event.type === 'bitmaps' ? item.event.rectangles.map(rectangle => rectangle.data) : item.event.type === 'palette' ? [item.event.palette] : item.event.shape ? [item.event.shape.pixels] : [];
+        const views = ['bitmaps', 'surface-frame'].includes(item.event.type) ? item.event.rectangles.map(rectangle => rectangle.data) : item.event.type === 'palette' ? [item.event.palette] : item.event.shape ? [item.event.shape.pixels] : [];
         for (const view of views)
             if (!buffers.has(view.buffer)) {
                 buffers.add(view.buffer);
@@ -109,7 +113,7 @@ function flush() {
     if (credit)
         wireCredit = 0;
     const id = nextFrame++;
-    inflight.set(id, credit);
+    inflight.set(id, { credit, tokens: commands.filter(c => c.type === 'surface-frame' && c.token !== null).map(c => c.token) });
     postMessage({ type: 'frame', id, commands }, transfer);
     if (queue.length)
         scheduleFlush();
@@ -134,7 +138,10 @@ function openSession(options, negotiation) {
             }
         } });
     session.start();
-    statsTimer = setInterval(() => send({ type: 'statistics', ...session.stats(), queuedBytes, inflight: inflight.size }), 1000);
+    statsTimer = setInterval(() => {
+        try { session.checkGraphicsDeadline(); send({ type: 'statistics', ...session.stats(), queuedBytes, inflight: inflight.size }); }
+        catch (error) { fail(error); }
+    }, 1000);
 }
 function start(message) {
     const options = message.options;
@@ -246,8 +253,9 @@ onmessage = received => {
         else if (message.type === 'frame-ack') {
             if (!inflight.has(message.id))
                 return;
-            const credit = inflight.get(message.id);
+            const { credit, tokens } = inflight.get(message.id);
             inflight.delete(message.id);
+            for (const token of tokens) session?.presentSurface(token);
             if (credit && socket?.readyState === 1)
                 socket.send(JSON.stringify({ type: 'ack', bytes: credit }));
             scheduleFlush();
