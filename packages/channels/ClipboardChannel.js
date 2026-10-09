@@ -6,6 +6,10 @@ import { CLIPBOARD_LIMIT, encodeClipboardHtml, decodeClipboardHtml, inspectClipb
 export const clipboardPdu = (type, flags = 0, body = new Uint8Array()) => new Writer(body.length + 8).u16le(type).u16le(flags).u32le(body.length).put(body).finish();
 const HTML = 0xc001, PNG = 0xc002;
 const names = new Map([[13, ''], [8, ''], [17, ''], [HTML, 'HTML Format'], [PNG, 'PNG']]);
+const clearSnapshot = snapshot => {
+    for (const bytes of snapshot.values()) bytes.fill(0);
+    snapshot.clear();
+};
 
 /** Clipboard protocol only. No DOM, filesystem, or implicit OS clipboard writes.
  * Registered formats are mapped by NAME, never by a guessed remote ID.
@@ -179,21 +183,28 @@ export class ClipboardChannel {
         let total = 0;
         const add = (id, bytes) => {
             total += bytes.length;
-            requireThat(bytes.length <= this.limit && total <= this.limit * 2, 'CLIPBOARD_LIMIT', 'Clipboard snapshot exceeds its memory budget');
+            if (bytes.length > this.limit || total > this.limit * 2) {
+                bytes.fill(0);
+                throw new ProtocolError('CLIPBOARD_LIMIT', 'Clipboard snapshot exceeds its memory budget');
+            }
             local.set(id, bytes);
         };
-        if (content.text != null) {
-            const text = content.text;
-            requireThat(typeof text === 'string' && text.length <= this.limit && !text.includes('\0') &&
-                (text.replace(/\r?\n/g, '\r\n').length + 1) * 2 <= this.limit, 'CLIPBOARD_LIMIT', 'Clipboard text is too large or contains NUL');
-            add(13, utf16(text.replace(/\r?\n/g, '\r\n'), true));
-        }
-        if (content.html != null) add(HTML, encodeClipboardHtml(content.html));
-        if (content.png != null) { inspectClipboardPng(content.png); add(PNG, content.png.slice()); }
-        if (content.image != null) {
-            add(17, encodeClipboardDib(content.image, true));
-            add(8, encodeClipboardDib(content.image, false));
-        }
+        try {
+            if (content.text != null) {
+                const text = content.text;
+                requireThat(typeof text === 'string' && text.length <= this.limit && !text.includes('\0') &&
+                    (text.replace(/\r?\n/g, '\r\n').length + 1) * 2 <= this.limit, 'CLIPBOARD_LIMIT', 'Clipboard text is too large or contains NUL');
+                add(13, utf16(text.replace(/\r?\n/g, '\r\n'), true));
+            }
+            if (content.html != null) add(HTML, encodeClipboardHtml(content.html));
+            if (content.png != null) { inspectClipboardPng(content.png); add(PNG, content.png.slice()); }
+            if (content.image != null) {
+                add(17, encodeClipboardDib(content.image, true));
+                add(8, encodeClipboardDib(content.image, false));
+            }
+        } catch (error) { clearSnapshot(local); throw error; }
+        // Keep only the in-flight advertised snapshot and the newest local copy.
+        if (this.local !== this.advertised) clearSnapshot(this.local);
         this.local = local;
         this.localText = content.text ?? null;
         // A local copy takes ownership; do not allow an old in-flight remote
@@ -207,6 +218,7 @@ export class ClipboardChannel {
     announce() {
         if (this.closed) return;
         if (this.announcementPending) { this.announceAgain = true; return; }
+        if (this.advertised !== this.local) clearSnapshot(this.advertised);
         this.advertised = this.local;
         this.denied = false;
         this.announcementPending = true;
@@ -222,7 +234,7 @@ export class ClipboardChannel {
         if (this.closed) return;
         this.closed = true; this.ready = false;
         clearTimeout(this.timer);
-        for (const map of [this.local, this.advertised]) { for (const data of map.values()) data.fill(0); map.clear(); }
+        for (const map of new Set([this.local, this.advertised])) clearSnapshot(map);
         this.localText = null; this.pending = null; this.requests = [];
         this.remote.clear();
     }

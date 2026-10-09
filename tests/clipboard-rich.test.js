@@ -183,3 +183,24 @@ test('Rich clipboard traverses active Session, MCS and fragmented static channel
     assert.equal(decodeClipboardHtml(received.find(p => p.type === 5).body), html);
     assert.equal(client.state, 'active');
 });
+
+
+test('Replacing clipboard snapshots clears superseded data but retains the advertised generation until its ACK', t => {
+    const { channel: c, sent } = setup(t);
+    c.setText('first');
+    const first = c.local.get(13);
+    c.setText('second');
+    const second = c.local.get(13);
+    assert.ok(first.some(b => b !== 0), 'advertised bytes are still available to the peer');
+    c.setText('third');
+    const third = c.local.get(13);
+    assert.ok(second.every(b => b === 0), 'unadvertised superseded copy is cleared');
+    c.receive(pdu(4, 0, new Writer().u32le(13).finish()));
+    assert.equal(new Reader(sent.at(-1).body).utf16(sent.at(-1).body.length), 'first\0');
+    c.receive(pdu(3, 1));
+    assert.ok(first.every(b => b === 0), 'previous advertised copy clears only after its ACK');
+    c.receive(pdu(4, 0, new Writer().u32le(13).finish()));
+    assert.equal(new Reader(sent.at(-1).body).utf16(sent.at(-1).body.length), 'third\0');
+    c.close();
+    assert.ok(third.every(b => b === 0), 'disconnect clears the final copy');
+});
