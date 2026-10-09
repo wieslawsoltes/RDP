@@ -1,6 +1,8 @@
 import { parentPort } from 'node:worker_threads';
 import { LoopbackServer } from '../../packages/lab/LoopbackServer.js';
 import { configureSurfacePeer,surfaceBits,surfaceMarker,sampleNsc } from './SurfacePeer.js';
+import { scr,slowOrders } from './GdiWire.js';
+import { toRgba } from '../../packages/codecs/Pixels.js';
 import { concat } from '../../packages/binary/Writer.js';
 let socket,peer,state,time=1000,timerId=0,autoReceipt=true,lastFrame=0,transferred=0;
 const events=[],receipts=[],wireAcks=[],timers=new Map();
@@ -13,7 +15,7 @@ globalThis.postMessage=(value,transfer=[])=>{
     if(copy.type==='frame'){
         lastFrame=copy.id;
         for(const c of value.commands)for(const r of c.rectangles||[]){if(r.data.byteLength!==0)throw new Error('Pixel buffer was not transferred');transferred++;}
-        events.push({type:'render',id:copy.id,commands:copy.commands.map(c=>({type:c.type,token:c.token,rectangles:c.rectangles?.length,encoding:c.rectangles?.[0]?.encoding}))});
+        events.push({type:'render',id:copy.id,commands:copy.commands.map(c=>({type:c.type,token:c.token,rectangles:c.rectangles?.length,encoding:c.rectangles?.[0]?.encoding,firstPixel:c.rectangles?.length?[...toRgba(c.rectangles[0]).subarray(0,4)]:null}))});
         if(autoReceipt)queueMicrotask(()=>dispatch({type:'frame-ack',id:copy.id}));
         else receipts.push(copy.id);
     }else events.push(copy);
@@ -37,10 +39,11 @@ parentPort.on('message',command=>{serial=serial.then(async()=>{
     const {id,op,value}=command;
     try{
         if(op==='start')dispatch({type:'start',mode:'remote',url:'ws://127.0.0.1:8787/bridge',token:'test-token-0123456789abcdef',password:'test',
-            options:{surfaceGraphics:true,surfaceQuality:'balanced',bpp:32,resize:false,security:'tls'}});
+            options:{surfaceGraphics:true,surfaceQuality:'balanced',bpp:32,resize:false,security:'tls',orders:value===true}});
         else if(op==='begin')peer.surface(concat(surfaceMarker(0,value),surfaceBits()));
         else if(op==='end')peer.surface(surfaceMarker(1,value));
         else if(op==='frame')peer.surface(concat(surfaceMarker(0,value),surfaceBits({width:71,height:15,data:sampleNsc({width:71,height:15})}),surfaceMarker(1,value)));
+        else if(op==='copy')peer.data(2,slowOrders(scr(100,100,7,5,0xcc,0,0)));
         else if(op==='hold')autoReceipt=!value;
         else if(op==='receipt')dispatch({type:'frame-ack',id:value});
         else if(op==='reactivate')peer.reactivateSurface();

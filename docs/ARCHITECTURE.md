@@ -16,7 +16,7 @@ Any nonterminal state → failed / closed
 
 `Session.receive()` feeds `Framer`, which distinguishes TPKT from fast-path output and preserves stream boundaries across arbitrary socket reads. Slow-path payloads pass through X.224 and MCS before Share Control/Data or static-channel dispatch. A protocol error terminates the session instead of guessing how to recover after stream desynchronization.
 
-Desktop dimensions become authoritative only after Demand Active / reactivation. A display-control request does not merely resize a local canvas. The server must confirm the new desktop through the session protocol. Capability negotiation deliberately selects the implemented bitmap profile; drawing-order support, surface/advanced codec capabilities and device redirection are not advertised. MPPC 8/64 KiB receive compression and bounded planar bitmap support are implemented.
+Desktop dimensions become authoritative only after Demand Active / reactivation. A display-control request does not merely resize a local canvas. The server must confirm the new desktop through the session protocol. Capability negotiation selects the implemented bitmap profile by default. Explicit GDI opt-in at matching 24/32-bit depth adds six blit orders, Revision 1/2 caches and offscreen support only. The separate surface-graphics opt-in negotiates raw/NSCodec surface commands and frame acknowledgements. RDPGFX/video codecs, glyphs and geometric orders remain unadvertised. Device support is limited to the separately documented channel families. MPPC 8/64 KiB receive compression and bounded planar bitmap support are implemented.
 
 `Session` requires already verified security establishment. Its default protocol selection is not proof that a socket was authenticated; transport adapters must perform the handshake and pass the actual requested/selected protocol values. `RdpConnection` is the provided implementation of that precondition.
 
@@ -47,6 +47,32 @@ Some bounds are intentionally stricter than a maximum theoretical protocol encod
 The CPU decoder interprets interleaved RLE operations using foreground/background state and the previous scanline. Its result remains packed in the original pixel depth. Raw bitmap data likewise remains packed. Pixel conversion handles BGR555, BGR565, BGR24, BGRX32, palette8, row padding and bottom-up ordering.
 
 The Canvas and WebGL2 paths use `Pixels.toRgba()` as their CPU conversion implementation. The pixel test constructs fixtures and compares renderer readback to an expected desktop buffer, then checks classic cursor output separately. That test is useful for the compositor but is not independent validation of every pixel decoder rule.
+
+### Worker-side GDI blits
+
+`render/gdi/Orders.js` owns the canonical primary surface, retained order fields,
+shared clipping bounds and offscreen map. `BitmapCache.js` owns fixed inventories
+and cached palettes. Ordinary and surface bitmap updates update the shadow **before** their
+buffers are transferred, so later ScrBlt reads current pixels. NSCodec converts
+directly into canonical XRGB without an intermediate RGBA allocation. GDI updates
+inside a marked surface frame are held in wire order until END; they do not
+bypass the frame presentation receipt. Indexed cached
+bitmaps retain indices and expand against the selected cached palette at draw
+time. MemBlt/Mem3Blt source Y coordinates are inverted using the original source
+height and requested blit height, before clipping.
+
+ROP3 runs on the CPU over 24-bit RGB. Solid fills and source copies use typed-array
+bulk operations. Other operations use bit-parallel truth-table evaluation and
+memmove traversal for same-surface overlap. Damage uses bounded 64-pixel tiles
+with sub-tile extents, coalescing without uploading an entire tile for one pixel.
+Only fresh, owned BGRA descriptors leave the worker. Offscreen changes are not
+published until copied onto the primary. No GPU-to-CPU synchronization is needed.
+
+A malformed order fails the session and clears retained surfaces/caches; skipping
+it would invalidate subsequent field histories. Reactivation clears the primary
+surface and retains connection-local order/cache state within the same profile.
+A depth/cache-revision change constructs a new engine. This behavior still needs
+independent server qualification. See `changes/0013-gdi-blits.md` for budgets.
 
 ### WebGPU
 

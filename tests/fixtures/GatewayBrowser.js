@@ -1,5 +1,7 @@
 import { configureSurfacePeer, surfaceBits, surfaceMarker } from './SurfacePeer.js';
 import { concat } from '../../packages/binary/Writer.js';
+import * as GdiWire from './GdiWire.js';
+import { configureGdiPeer } from './GdiPeer.js';
 import { configureMicrophonePeer } from './MicrophonePeer.js';
 import { configureAudioPeer } from './AudioPeer.js';
 import { configureRichClipboard } from './RichClipboardPeer.js';
@@ -31,12 +33,19 @@ const remote = await serveRdp(cert, { nla: true, configurePeer: peer => {
                     surfaceBits({type:6,x:6,y:7,width:2,height:2,drawWidth:1,drawHeight:1,codec:0,
                         data:Uint8Array.from([90,80,70,0,90,80,70,0,90,80,70,0,90,80,70,0]),extra:true}), surfaceMarker(1, base + 2)));
                 if (e.a === 0x26) peer.surface(concat(surfaceMarker(0, base + 3), raw(400,400,[40,50,60,255]), surfaceMarker(1, base + 3)));
+                if (e.a === 0x22) { // g: NSCodec, GDI and ordinary bitmap in one marked frame
+                    peer.surface(concat(surfaceMarker(0, base + 4), surfaceBits({x:4,y:5})));
+                    peer.data(2, GdiWire.slowOrders(GdiWire.scr(30,10,7,5,0xcc,4,5), GdiWire.opaque(32,12,1,1,0xabcdef)));
+                    peer.bitmap(36,14,1,1,Uint8Array.of(50,60,70,255));
+                    peer.surface(surfaceMarker(1, base + 4));
+                }
                 if (e.a === 0x13) peer.reactivateSurface(); // r
                 if (e.a === 0x2d) peer.surface(surfaceBits({codec:99})); // x: unnegotiated codec
                 if (e.a === 0x30) console.log('SURFACE_BARRIER', JSON.stringify({acks:state.acks,confirms:state.confirms}));
             }
         };
     }
+    if (process.env.RDP_GDI_FIXTURE === '1') configureGdiPeer(peer, { revision: 2, paintOnActive: true });
     if (process.env.RDP_MICROPHONE_FIXTURE === '1') {
         let total = 0, openReplies = 0, nonzero = 0;
         const counts = [0, 0], rms = [0, 0];

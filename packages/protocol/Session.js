@@ -1,3 +1,4 @@
+import { GdiOrders } from '../render/gdi/Orders.js';
 import { parseServerMonitorLayout } from './MonitorLayout.js';
 import { MppcDecoder } from '../codecs/Mppc.js';
 import { SurfaceCommands } from './SurfaceCommands.js';
@@ -28,6 +29,8 @@ export class Session {
         this.emit = emit;
         this.options = { width: 1280, height: 800, bpp: 24, clipboard: true, resize: true, selectedProtocol: 2, requestedProtocols: 2, ...options };
         this.options.audio = this.options.audio === true;
+        this.options.orders = this.options.orders === true;
+        this.gdi = null;
         this.options.microphone = this.options.microphone === true;
         this.canSendAudioInput = canSendAudioInput; this.nextMicrophoneRequest = 0;
         this.state = 'new'; this.nextSurfaceToken = 0;
@@ -182,15 +185,28 @@ export class Session {
             this.options.height = demand.height;
             // A server that cannot offer 32 bpp selects the negotiated fallback.
             if (this.options.bpp === 32 && demand.bpp !== 32) this.options.bpp = demand.bpp;
+            const hostCache = demand.map.get(18);
+            if (hostCache && this.options.orders) requireThat(hostCache.length === 4 && hostCache[0] === 1, 'GDI_CACHE_HOST', 'Invalid bitmap-cache host capability');
+            this.options.orderCacheRevision = hostCache ? 2 : 1;
+            const gdiEnabled = this.options.orders && [24, 32].includes(this.options.bpp) && this.options.bpp === demand.bpp;
+            if (this.gdi && (!gdiEnabled || this.gdi.bpp !== this.options.bpp || this.gdi.revision !== this.options.orderCacheRevision)) {
+                this.gdi.close(); this.gdi = null;
+            }
+            if (gdiEnabled) {
+                if (this.gdi) this.gdi.resize(demand.width, demand.height);
+                else this.gdi = new GdiOrders({ ...this.desktop, bpp: this.options.bpp, revision: this.options.orderCacheRevision });
+            }
+            this.emit({ type: 'drawing-profile', enabled: !!this.gdi, cacheRevision: this.gdi?.revision || null });
             this.surface?.close();
             this.surfaceProfile = negotiateSurfaceGraphics(demand.map, { ...this.options, bpp: this.options.bpp });
             this.surface = this.surfaceProfile.flags ? new SurfaceCommands({ desktop: this.desktop, profile: this.surfaceProfile,
+                observe: bitmap => this.gdi?.bitmap([bitmap]),
                 emit: value => this.emit(value), nextToken: () => ++this.nextSurfaceToken,
                 acknowledge: id => this.dataSend(56, new Writer().u32le(id).finish()) }) : null;
             this.emit({ type: 'graphics', ...this.surfaceProfile });
             this.emit({ type: 'desktop', ...this.desktop, bpp: this.options.bpp });
             this.transition('activating');
-            this.channelSend(this.ioChannel, shareControl(3, this.userId, confirmActiveBody(this.shareId, this.userId, { ...this.options, surfaceProfile: this.surfaceProfile })));
+            this.channelSend(this.ioChannel, shareControl(3, this.userId, confirmActiveBody(this.shareId, this.userId, { ...this.options, surfaceProfile: this.surfaceProfile, orders: !!this.gdi })));
             this.dataSend(31, new Writer().u16le(1).u16le(this.serverId).finish());
             this.dataSend(20, new Writer().u16le(4).u16le(0).u32le(0).finish());
             this.dataSend(20, new Writer().u16le(1).u16le(0).u32le(0).finish());
@@ -282,11 +298,12 @@ export class Session {
             if (this.surface?.current) {
                 try { for (const rect of rectangles) this.surface.addBitmap(rect); }
                 catch (error) { for (const rect of rectangles) if (rect.data.byteLength) rect.data.fill(0); throw error; }
-            } else this.emit({ type: 'bitmaps', rectangles });
+            } else { this.gdi?.bitmap(rectangles); this.emit({ type: 'bitmaps', rectangles }); }
         }
         else if (type === 2) {
             requireThat(!this.surface?.current, 'SURFACE_PALETTE', 'Palette changes inside marked surface frames are unsupported');
-            this.emit({ type: 'palette', palette: parsePalette(r) });
+            const palette = parsePalette(r); this.gdi?.setPalette(palette);
+            this.emit({ type: 'palette', palette });
         }
         else if (type === 3) {
             r.u16le();
@@ -296,14 +313,23 @@ export class Session {
             r.u16le();
             const count = r.u16le();
             r.u16le();
-            requireThat(count === 0, 'UNNEGOTIATED_ORDERS', 'Server sent GDI orders that were not advertised');
-            r.end();
+            this.orderUpdate(r, count);
         }
         else
             throw new ProtocolError('UPDATE_TYPE', `Unsupported update ${type}`);
     }
+    orderUpdate(r, count) {
+        requireThat(this.desktop && ['active', 'activating'].includes(this.state), 'GRAPHICS_STATE', 'Orders outside an activated desktop');
+        if (!this.gdi) { requireThat(count === 0, 'UNNEGOTIATED_ORDERS', 'Server sent GDI orders that were not advertised'); r.end(); return; }
+        const rectangles = this.gdi.receive(r, count);
+        if (this.surface?.current) {
+            try { for (const rect of rectangles) this.surface.addBitmap(rect, false); }
+            catch (error) { for (const rect of rectangles) if (rect.data.byteLength) rect.data.fill(0); throw error; }
+        } else if (rectangles.length) this.emit({ type: 'bitmaps', rectangles, source: 'gdi' });
+    }
     fastUpdate(code, bytes) {
-        if (code === 1 || code === 2) {
+        if (code === 0) { const r = new Reader(bytes), count = r.u16le(); this.orderUpdate(r, count); }
+        else if (code === 1 || code === 2) {
             const r = new Reader(bytes);
             requireThat(r.u16le() === code, 'UPDATE_CODE', 'Fast-path update type mismatch');
             this.update(bytes);
@@ -380,7 +406,7 @@ export class Session {
         if (this.state === 'active')
             this.dataSend(33, new Writer().u8(1).zeros(3).u16le(0).u16le(0).u16le(this.desktop.width - 1).u16le(this.desktop.height - 1).finish());
     }
-    stats() { return { receivedBytes: this.receivedBytes, packets: this.receivedPackets, bitmapBytes: this.bitmapBytes, state: this.state, graphics: this.surface?.stats() || null, audio: this.audio?.stats() || null, microphone: this.microphone?.stats() || null }; }
+    stats() { return { receivedBytes: this.receivedBytes, packets: this.receivedPackets, bitmapBytes: this.bitmapBytes, state: this.state, graphics: this.surface?.stats() || null, gdi: this.gdi?.stats() || null, audio: this.audio?.stats() || null, microphone: this.microphone?.stats() || null }; }
     fail(error) {
         if (this.state === 'failed' || this.state === 'closed')
             return;
@@ -388,7 +414,7 @@ export class Session {
         this.dispose();
         this.emit({ type: 'error', code: error.code || 'PROTOCOL_ERROR', message: error.message });
     }
-    dispose() { this.surface?.close(); this.surface = null; this.options.password = ''; this.staticChannels.close(); this.bulk?.reset(); this.fastPath.clear(); this.framer.clear(); this.pointer.clear(); }
+    dispose() { this.gdi?.close(); this.gdi = null; this.surface?.close(); this.surface = null; this.options.password = ''; this.staticChannels.close(); this.bulk?.reset(); this.fastPath.clear(); this.framer.clear(); this.pointer.clear(); }
     close() {
         if (this.state === 'closed')
             return;

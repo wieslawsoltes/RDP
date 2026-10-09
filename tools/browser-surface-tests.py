@@ -71,6 +71,11 @@ COMPARE = r"""async () => {
                 }
                 pixels+=16*15;
             }
+            // Equal dimensions still identify a new activation epoch. All
+            // renderer backends must clear primary pixels like the GDI shadow.
+            renderer.resize(40,40);await renderer.whenComplete();
+            const reset=await renderer.readSurface();
+            for(let i=0;i<reset.length;i++)if(i%4!==3&&reset[i]!==0)throw new Error(`${name} retained pixels after desktop reactivation`);
             if(failures.length)throw new Error(failures.join('; '));
             results.push({backend:name,available:true,pixels,differences:0,gpuHardwareQualified:false});
         }finally{renderer.destroy();canvas.remove();}
@@ -109,7 +114,7 @@ def main() -> None:
                         page.locator('#load-targets').click();expect(page.locator('#form-message')).to_contain_text('1 allowlisted target',timeout=15000)
                         page.locator('#backend').select_option('canvas');page.locator('#username').fill('User');page.locator('#domain').fill('LAB');page.locator('#password').fill('Password')
                         page.locator('details').filter(has=page.locator('#surface-graphics')).locator('summary').click()
-                        expect(page.locator('#surface-graphics')).not_to_be_checked();page.locator('#surface-graphics').check();page.locator('#surface-quality').select_option('balanced')
+                        expect(page.locator('#surface-graphics')).not_to_be_checked();page.locator('#surface-graphics').check();page.locator('#orders').check();page.locator('#surface-quality').select_option('balanced')
                         page.locator('#resize').uncheck();page.locator('#connect-button').click()
                         expect(page.locator('.session-foot')).to_contain_text('active',timeout=15000)
                         canvas=page.locator('.screen-host canvas')
@@ -161,10 +166,17 @@ def main() -> None:
                         page.wait_for_function('()=>{const p=document.querySelector(".screen-host canvas").getContext("2d").getImageData(4,5,1,1).data;return p[0]===3&&p[1]===2&&p[2]===1;}')
                         assert pixel(4,5)==[3,2,1,255]
                         canvas.press('e');wait_for(lambda v:v['acks']==[101,102,103,201]);compare_tile()
+                        canvas.press('g');wait_for(lambda v:v['acks']==[101,102,103,201,204])
+                        for y in range(5):
+                            for x in range(7):
+                                expected=pixel(x+4,y+5)
+                                if (x,y)==(2,2):expected=[171,205,239,255]
+                                if (x,y)==(6,4):expected=[50,60,70,255]
+                                assert pixel(x+30,y+10)==expected,(x,y,pixel(x+30,y+10),expected)
                         canvas.press('x');expect(page.locator('.session-overlay')).to_contain_text('SURFACE_CODEC',timeout=15000)
                         assert errors==[],errors
                         result={'renderers':comparisons,'atomicFrame':True,'presentationGatedAck':True,'multiFragment':True,
-                            'frameOverGatewayWindow':True,'reactivation':True,'unnegotiatedCodecRejected':True,'independentWindowsInterop':False}
+                            'frameOverGatewayWindow':True,'reactivation':True,'mixedGdiSurfaceFrame':True,'unnegotiatedCodecRejected':True,'independentWindowsInterop':False}
                         print(json.dumps(result,indent=2))
                     finally:browser.close()
             finally:

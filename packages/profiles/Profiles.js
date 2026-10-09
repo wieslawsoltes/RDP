@@ -1,5 +1,5 @@
 const STORAGE_KEY = 'lrdp.profiles.v1';
-const allowed = ['id', 'name', 'targetId', 'username', 'domain', 'security', 'width', 'height', 'bpp', 'backend', 'clipboard', 'richClipboard', 'resize', 'audio', 'microphone', 'surfaceGraphics', 'surfaceQuality'];
+const allowed = ['id', 'name', 'targetId', 'username', 'domain', 'security', 'width', 'height', 'bpp', 'backend', 'clipboard', 'richClipboard', 'resize', 'audio', 'microphone', 'surfaceGraphics', 'surfaceQuality', 'orders'];
 export function sanitizeProfile(input) {
     const value = {};
     for (const key of allowed)
@@ -21,6 +21,7 @@ export function sanitizeProfile(input) {
     value.richClipboard = value.clipboard && value.richClipboard === true;
     value.resize = value.resize !== false;
     value.audio = value.audio === true;
+    value.orders = value.orders === true;
     value.microphone = value.microphone === true; // Channel offer only; never device consent.
     value.surfaceGraphics = value.surfaceGraphics === true;
     value.surfaceQuality = value.surfaceQuality === 'balanced' ? 'balanced' : 'sharp';

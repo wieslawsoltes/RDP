@@ -31,7 +31,8 @@ const coverage = [
     ['Independent Windows / Windows Server interoperability qualification', 'Not completed'],
     ['CAL request/challenge/issuance/upgrade and encrypted gateway cache', 'Implemented / bounded profile'],
     ['Opt-in NSCodec surface graphics, GPU plane conversion and presentation-gated frame ACKs', 'Implemented'],
-    ['GDI orders, RemoteFX, RDPEGFX, AVC420/444', 'Not implemented'],
+    ['Opt-in GDI blits, Revision 1/2 bitmap/color caches and offscreen surfaces (24/32-bit)', 'Implemented'],
+    ['Remaining GDI geometry/text orders, RemoteFX, RDPEGFX, AVC420/444', 'Not implemented'],
     ['Kerberos, Remote Credential Guard, RD Gateway and UDP multitransport', 'Not implemented'],
     ['Opt-in PCM audio output over the reliable RDPSND channel', 'Implemented'],
     ['Explicit-consent PCM microphone over AUDIO_INPUT with bounded AudioWorklet capture', 'Implemented'],
@@ -106,7 +107,7 @@ function reconnectSession(session) {
     $('#form-message').textContent = 'Reconnect with fresh credentials. Verify the gateway address, paste its token, load its targets and enter your password again.';
     gatewayInput.focus();
 }
-function currentProfile() { return sanitizeProfile({ ...Object.fromEntries(new FormData(form)), clipboard: $('#clipboard').checked, richClipboard: $('#rich-clipboard').checked, resize: $('#resize').checked, audio: $('#audio').checked, microphone: $('#microphone').checked, surfaceGraphics: $('#surface-graphics').checked }); }
+function currentProfile() { return sanitizeProfile({ ...Object.fromEntries(new FormData(form)), clipboard: $('#clipboard').checked, richClipboard: $('#rich-clipboard').checked, resize: $('#resize').checked, audio: $('#audio').checked, microphone: $('#microphone').checked, surfaceGraphics: $('#surface-graphics').checked, orders: $('#orders').checked }); }
 function fillProfile(profile) {
     showOverview();
     const p = sanitizeProfile(profile);
