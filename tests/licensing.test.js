@@ -157,3 +157,11 @@ test('Licensing valid-client and cached paths do not require an ANSI user name',
     const fresh = client({ username: 'Łukasz' });
     assert.throws(() => begin(fresh), e => e.code === 'LICENSE_ANSI'); fresh.close();
 });
+
+test('Licensing Buffer-backed network data and hardware identity never alias owned secrets', () => {
+    const hardware = Buffer.from(hardwareId), c = client({ hardwareId: hardware });
+    const packet = Buffer.from(F.request(rsa.certificate)), before = Buffer.from(packet);
+    c.receive(packet); hardware.fill(0);
+    assert.deepEqual(c.hardwareId, hardwareId); c.close();
+    assert.deepEqual(packet, before);
+});

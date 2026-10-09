@@ -77,7 +77,7 @@ export function licensePublicKey(bytes, fallback) {
             const length = publicBlob.u32le(), bits = publicBlob.u32le(), dataLength = publicBlob.u32le(), exponent = publicBlob.u32le();
             requireThat(length >= 72 && length <= 1032 && bits === (length - 8) * 8 && dataLength === length - 9,
                 'LICENSE_RSA', 'Inconsistent RSA1 public-key lengths');
-            const modulus = publicBlob.take(length - 8).slice().reverse();
+            const modulus = new Uint8Array(publicBlob.take(length - 8)).reverse();
             requireThat(publicBlob.take(8).every(v => v === 0), 'LICENSE_RSA', 'Invalid RSA1 padding'); publicBlob.end();
             requireThat(r.u16le() === 8, 'LICENSE_CERTIFICATE', 'Invalid proprietary signature blob');
             const signature = r.take(r.u16le());

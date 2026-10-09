@@ -66,14 +66,14 @@ export function licensePdu(type, body, version = 3) {
     return new Writer().u8(type).u8(version | 0x80).u16le(body.length + 4).put(body).finish();
 }
 export function parseLicenseRequest(r) {
-    const serverRandom = r.take(32).slice(), version = r.u32le();
+    const serverRandom = new Uint8Array(r.take(32)), version = r.u32le();
     const company = licenseString(readCounted(r, 4096), true), product = licenseString(readCounted(r, 4096), true);
     const algorithms = new Reader(readBlob(r, 13, 256));
     requireThat(algorithms.remaining > 0 && algorithms.remaining % 4 === 0, 'LICENSE_ALGORITHM', 'Invalid licensing key exchange list');
     let rsa = false;
     while (algorithms.remaining) rsa = algorithms.u32le() === 1 || rsa;
     requireThat(rsa, 'LICENSE_ALGORITHM', 'Server does not offer RSA licensing exchange');
-    const certificate = readBlob(r, 3).slice(), count = r.u32le(), scopes = [];
+    const certificate = new Uint8Array(readBlob(r, 3)), count = r.u32le(), scopes = [];
     requireThat(count > 0 && count <= 64, 'LICENSE_SCOPES', 'Invalid licensing scope count');
     for (let i = 0; i < count; i++) scopes.push(licenseString(readBlob(r, 14, 4096)));
     r.end();
@@ -82,7 +82,7 @@ export function parseLicenseRequest(r) {
 export function parseNewLicense(bytes) {
     const r = new Reader(bytes), version = r.u32le(), scope = licenseString(readCounted(r, 4096));
     const company = licenseString(readCounted(r, 4096), true), product = licenseString(readCounted(r, 4096), true);
-    const data = readCounted(r, MAX_LICENSE_DATA).slice();
+    const data = new Uint8Array(readCounted(r, MAX_LICENSE_DATA));
     requireThat(data.length > 0, 'LICENSE_DATA', 'Server sent an empty client license');
     r.end();
     return { version, scope, company, product, data };

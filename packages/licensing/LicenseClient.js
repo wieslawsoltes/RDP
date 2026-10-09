@@ -14,7 +14,7 @@ export class LicenseClient {
         requireThat(secureTransport === true, 'LICENSE_TRANSPORT', 'Licensing requires a separately authenticated encrypted transport');
         requireThat(hardwareId instanceof Uint8Array && hardwareId.length === 20, 'LICENSE_HWID', 'Licensing needs a stable 20-byte device identifier');
         requireThat(typeof findLicense === 'function', 'LICENSE_STORE', 'Invalid licensing store provider');
-        this.hardwareId = hardwareId.slice();
+        this.hardwareId = new Uint8Array(hardwareId);
         requireThat(typeof username === 'string' && username.length <= 2047 && !username.includes('\0'), 'LICENSE_STRING', 'Invalid licensing user name');
         this.username = username;
         this.machineName = encodeLicenseString(machineName);
