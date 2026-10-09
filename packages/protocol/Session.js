@@ -106,7 +106,7 @@ export class Session {
         this.channels.forEach((name, index) => {
             const id = this.channelIds[index], send = data => this.staticChannels.transmit(id, data);
             if (name === 'cliprdr') {
-                this.clipboard = new ClipboardChannel(send, (kind, value) => this.emit({ ...value, type: 'clipboard', kind }));
+                this.clipboard = new ClipboardChannel(send, (kind, value) => this.emit({ ...value, type: 'clipboard', kind }), { rich: this.options.richClipboard === true });
                 this.staticChannels.register(id, this.clipboard);
             }
             if (name === 'drdynvc') {
@@ -312,6 +312,8 @@ export class Session {
             this.input(events.slice(i, i + 128));
     }
     setClipboard(text) { requireThat(this.clipboard, 'CLIPBOARD_DISABLED', 'Clipboard was not enabled'); this.clipboard.setText(text); }
+    setClipboardContent(content) { requireThat(this.state === 'active' && this.clipboard, 'CLIPBOARD_DISABLED', 'An active clipboard channel is required'); this.clipboard.setContent(content); }
+    requestClipboardFormat(kind) { requireThat(this.state === 'active' && this.clipboard, 'CLIPBOARD_DISABLED', 'An active clipboard channel is required'); return this.clipboard.requestFormat(kind); }
     setMonitors(monitors) { requireThat(this.state === 'active' && this.display, 'DISPLAY_DISABLED', 'Active display control is required'); return this.display.layout(monitors); }
     resize(width, height, scale) { requireThat(this.display, 'DISPLAY_DISABLED', 'Server did not open display control'); this.display.resize(width, height, scale); }
     refresh() {
