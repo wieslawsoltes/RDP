@@ -43,6 +43,7 @@ export class CanvasRenderer {
         }
         this.stats.frames++;
     }
+    whenComplete() { return Promise.resolve(); }
     async readSurface() { return new Uint8Array(this.backContext.getImageData(0, 0, this.width, this.height).data); }
     destroy() { this.back.width = this.back.height = this.canvas.width = this.canvas.height = 1; }
 }

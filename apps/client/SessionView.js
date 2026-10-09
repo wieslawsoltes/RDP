@@ -1,3 +1,4 @@
+import { PresentationQueue } from '../../packages/render/PresentationQueue.js';
 import { BrowserMicrophone } from './BrowserMicrophone.js';
 import { BrowserAudio } from './BrowserAudio.js';
 import { readBrowserClipboard, writeBrowserClipboard, releaseClipboardContent, ClipboardSnapshot } from './BrowserClipboard.js';
@@ -11,6 +12,8 @@ export class SessionView {
         this.id = crypto.randomUUID();
         this.options = { ...options, audio: options.audio === true && typeof globalThis.AudioContext === 'function',
             microphone: mode === 'remote' && options.microphone === true && typeof globalThis.AudioWorkletNode === 'function' && !!navigator.mediaDevices?.getUserMedia };
+        this.presentation = new PresentationQueue({ acknowledge: id => this.post({ type: 'frame-ack', id }),
+            fail: error => this.error({ code: 'PRESENTATION_FAILED', message: error.message }) });
         this.mode = mode;
         this.onClose = onClose;
         this.onReconnect = onReconnect;
@@ -277,6 +280,7 @@ export class SessionView {
         if (value.type === 'state' || value.type === 'stage') {
             this.state = value.state;
             if (value.state === 'closed') {
+                this.presentation.close();
                 this.clipboardSnapshot.clear(); this.audio?.close(); this.microphone?.close(); this.input?.destroy();
                 this.displayReady = false; this.resolution.disabled = true;
                 this.healthLabel.textContent = 'Gateway: disconnected';
@@ -299,10 +303,10 @@ export class SessionView {
             this.renderRaf = requestAnimationFrame(() => { this.renderRaf = 0; this.renderFrames(); });
     }
     renderFrames() {
-        if (this.closed || this.rendering || !this.renderer)
+        if (this.closed || this.state === 'failed' || this.rendering || !this.renderer)
             return;
         try {
-            while (this.commands.length) {
+            while (this.commands.length && this.state !== 'failed') {
                 const frame = this.commands.shift();
                 let rectangles = [], pointerChanged = false;
                 const flush = () => {
@@ -320,7 +324,11 @@ export class SessionView {
                     }
                     else {
                         flush();
-                        if (command.type === 'desktop') {
+                        if (command.type === 'surface-frame') {
+                            this.renderer.apply(command.rectangles);
+                            pointerChanged = false;
+                        }
+                        else if (command.type === 'desktop') {
                             this.width = command.width;
                             this.height = command.height;
                             this.renderer.resize(this.width, this.height);
@@ -340,7 +348,9 @@ export class SessionView {
                 flush();
                 if (pointerChanged)
                     this.renderer.present();
-                this.post({ type: 'frame-ack', id: frame.id });
+                if (frame.commands.some(c => c.type === 'surface-frame') || this.presentation.pending.size)
+                    this.presentation.submit(frame.id, this.renderer);
+                else this.post({ type: 'frame-ack', id: frame.id });
             }
             this.updateMetrics();
         }
@@ -351,6 +361,10 @@ export class SessionView {
     async recoverRenderer(message) {
         if (this.closed || this.rendering)
             return;
+        if (this.presentation.pending.size) {
+            this.error({ code: 'PRESENTATION_LOST', message: 'Graphics device failed before surface presentation; reconnect to start a fresh desktop.' });
+            return;
+        }
         this.rendering = true;
         this.input?.destroy();
         this.renderer?.destroy();
@@ -582,6 +596,8 @@ export class SessionView {
             this.metrics.append(element('span', '', value));
     }
     error(error) {
+        this.presentation.close();
+        this.commands = [];
         this.state = 'failed';
         this.displayReady = false; this.resolution.disabled = true;
         this.reconnectButton.hidden = this.mode !== 'remote' || !this.onReconnect;
@@ -625,6 +641,7 @@ export class SessionView {
     close() {
         if (this.closed)
             return;
+        this.presentation.close();
         this.input?.destroy();
         this.audio?.close(); this.microphone?.close();
         this.post({ type: 'close' });

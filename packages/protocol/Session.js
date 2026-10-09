@@ -1,5 +1,7 @@
 import { parseServerMonitorLayout } from './MonitorLayout.js';
 import { MppcDecoder } from '../codecs/Mppc.js';
+import { SurfaceCommands } from './SurfaceCommands.js';
+import { negotiateSurfaceGraphics } from './SurfaceCapabilities.js';
 import { Reader } from '../binary/Reader.js';
 import { Writer } from '../binary/Writer.js';
 import { ProtocolError, requireThat } from '../binary/ProtocolError.js';
@@ -28,7 +30,7 @@ export class Session {
         this.options.audio = this.options.audio === true;
         this.options.microphone = this.options.microphone === true;
         this.canSendAudioInput = canSendAudioInput; this.nextMicrophoneRequest = 0;
-        this.state = 'new';
+        this.state = 'new'; this.nextSurfaceToken = 0;
         this.licensingComplete = false;
         this.gatewayLicensing = this.options.licensing === 'gateway-v1';
         this.channels = [...(this.options.clipboard ? ['cliprdr'] : []), ...(this.options.resize || this.options.microphone ? ['drdynvc'] : []), ...(this.options.audio ? ['rdpsnd'] : [])];
@@ -180,9 +182,15 @@ export class Session {
             this.options.height = demand.height;
             // A server that cannot offer 32 bpp selects the negotiated fallback.
             if (this.options.bpp === 32 && demand.bpp !== 32) this.options.bpp = demand.bpp;
+            this.surface?.close();
+            this.surfaceProfile = negotiateSurfaceGraphics(demand.map, { ...this.options, bpp: this.options.bpp });
+            this.surface = this.surfaceProfile.flags ? new SurfaceCommands({ desktop: this.desktop, profile: this.surfaceProfile,
+                emit: value => this.emit(value), nextToken: () => ++this.nextSurfaceToken,
+                acknowledge: id => this.dataSend(56, new Writer().u32le(id).finish()) }) : null;
+            this.emit({ type: 'graphics', ...this.surfaceProfile });
             this.emit({ type: 'desktop', ...this.desktop, bpp: this.options.bpp });
             this.transition('activating');
-            this.channelSend(this.ioChannel, shareControl(3, this.userId, confirmActiveBody(this.shareId, this.userId, this.options)));
+            this.channelSend(this.ioChannel, shareControl(3, this.userId, confirmActiveBody(this.shareId, this.userId, { ...this.options, surfaceProfile: this.surfaceProfile })));
             this.dataSend(31, new Writer().u16le(1).u16le(this.serverId).finish());
             this.dataSend(20, new Writer().u16le(4).u16le(0).u32le(0).finish());
             this.dataSend(20, new Writer().u16le(1).u16le(0).u32le(0).finish());
@@ -193,6 +201,7 @@ export class Session {
             requireThat(this.desktop, 'DEACTIVATION_STATE', 'Deactivation before activation');
             this.fastPath.clear();
             this.pointer.clear();
+            this.surface?.close(); this.surface = null;
             this.transition('reactivating');
             return;
         }
@@ -270,7 +279,10 @@ export class Session {
             const rectangles = parseBitmapUpdate(r, this.desktop);
             for (const rect of rectangles)
                 this.bitmapBytes += rect.data.length;
-            this.emit({ type: 'bitmaps', rectangles });
+            if (this.surface?.current) {
+                try { for (const rect of rectangles) this.surface.addBitmap(rect); }
+                catch (error) { for (const rect of rectangles) if (rect.data.byteLength) rect.data.fill(0); throw error; }
+            } else this.emit({ type: 'bitmaps', rectangles });
         }
         else if (type === 2)
             this.emit({ type: 'palette', palette: parsePalette(r) });
@@ -293,6 +305,10 @@ export class Session {
             const r = new Reader(bytes);
             requireThat(r.u16le() === code, 'UPDATE_CODE', 'Fast-path update type mismatch');
             this.update(bytes);
+        }
+        else if (code === 4) {
+            requireThat(this.surface, 'SURFACE_UNNEGOTIATED', 'Server sent unnegotiated surface updates');
+            this.surface.receive(bytes);
         }
         else if (code === 3) {
             requireThat(bytes.length === 0, 'FASTPATH_SYNC', 'Invalid fast-path synchronization');
@@ -344,6 +360,8 @@ export class Session {
         for (let i = 0; i < events.length; i += 128)
             this.input(events.slice(i, i + 128));
     }
+    presentSurface(token) { return this.surface?.presented(token) || false; }
+    checkGraphicsDeadline() { this.surface?.checkDeadline(); }
     microphoneReady(requestId, captureId, result) {
         const accepted = this.microphone?.ready(requestId, captureId, result) === true;
         this.emit({ type: 'microphone', kind: 'ready-result', requestId, captureId, accepted });
@@ -360,7 +378,7 @@ export class Session {
         if (this.state === 'active')
             this.dataSend(33, new Writer().u8(1).zeros(3).u16le(0).u16le(0).u16le(this.desktop.width - 1).u16le(this.desktop.height - 1).finish());
     }
-    stats() { return { receivedBytes: this.receivedBytes, packets: this.receivedPackets, bitmapBytes: this.bitmapBytes, state: this.state, audio: this.audio?.stats() || null, microphone: this.microphone?.stats() || null }; }
+    stats() { return { receivedBytes: this.receivedBytes, packets: this.receivedPackets, bitmapBytes: this.bitmapBytes, state: this.state, graphics: this.surface?.stats() || null, audio: this.audio?.stats() || null, microphone: this.microphone?.stats() || null }; }
     fail(error) {
         if (this.state === 'failed' || this.state === 'closed')
             return;
@@ -368,7 +386,7 @@ export class Session {
         this.dispose();
         this.emit({ type: 'error', code: error.code || 'PROTOCOL_ERROR', message: error.message });
     }
-    dispose() { this.options.password = ''; this.staticChannels.close(); this.bulk?.reset(); this.fastPath.clear(); this.framer.clear(); this.pointer.clear(); }
+    dispose() { this.surface?.close(); this.surface = null; this.options.password = ''; this.staticChannels.close(); this.bulk?.reset(); this.fastPath.clear(); this.framer.clear(); this.pointer.clear(); }
     close() {
         if (this.state === 'closed')
             return;

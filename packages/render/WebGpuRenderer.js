@@ -146,7 +146,8 @@ export class WebGpuRenderer {
         for (let i = 0; i < rectangles.length; i++) {
             const r = rectangles[i];
             this.scratch.set(r.data, offset);
-            this.jobScratch.set([offset, r.stride, r.width, r.height, r.bpp, r.bottomUp === false ? 0 : 1, r.x, r.y, r.drawWidth, r.drawHeight, 0, 0], i * 12);
+            this.jobScratch.set([offset, r.stride, r.width, r.height, r.bpp, r.bottomUp === false ? 0 : 1, r.x, r.y, r.drawWidth, r.drawHeight, r.encoding === 'nscodec' ? 1 : 0,
+                r.encoding === 'nscodec' ? (r.subsampled ? 1 : 0) | (r.sourceBpp === 24 ? 2 : 0) | (r.colorLossLevel << 8) : 0], i * 12);
             offset = align(offset + r.data.length, 4);
         }
         const uniforms = new Uint32Array(plan.batches.length * this.uniformAlignment / 4);
@@ -207,6 +208,10 @@ export class WebGpuRenderer {
                 this.queryRead.unmap();
             }
         }).catch(() => { }).finally(() => { this.queryPending = false; });
+    }
+    whenComplete() {
+        requireThat(!this.destroyed, 'WEBGPU_CLOSED', 'Renderer is closed');
+        return this.device.queue.onSubmittedWorkDone();
     }
     async readSurface() {
         const width = this.width, height = this.height, row = align(width * 4, 256), buffer = this.device.createBuffer({ size: row * height, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ }), encoder = this.device.createCommandEncoder();
