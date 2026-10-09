@@ -32,8 +32,10 @@ const coverage = [
     ['Full RDS CAL issuance, persistence, renewal and redirection', 'Not implemented'],
     ['GDI orders, RemoteFX, RDPEGFX, AVC420/444', 'Not implemented'],
     ['Kerberos, Remote Credential Guard, RD Gateway and UDP multitransport', 'Not implemented'],
-    ['Audio, microphone, camera, native touch, USB, smart cards, drives and printers', 'Not implemented'],
-    ['Clipboard files/images and RemoteApp', 'Not implemented'],
+    ['Opt-in PCM audio output over the reliable RDPSND channel', 'Implemented'],
+    ['Bounded gateway health probes and explicit fresh-credential reconnection', 'Implemented'],
+    ['Microphone, camera, native touch, USB, smart cards, drives and printers', 'Not implemented'],
+    ['Clipboard file streaming, automatic session resumption and RemoteApp', 'Not implemented'],
 ];
 for (const [name, status] of coverage) {
     const row = element('div', 'coverage-row');
@@ -84,13 +86,23 @@ function openSession(mode, options) {
         return;
     }
     let session;
-    session = new SessionView({ mode, options, password: mode === 'lab' ? '' : $('#password').value, token: mode === 'lab' ? '' : $('#bridge-token').value, onClose: closeSession, onSelect: () => selectSession(session.id) });
+    session = new SessionView({ mode, options, password: mode === 'lab' ? '' : $('#password').value, token: mode === 'lab' ? '' : $('#bridge-token').value, onClose: closeSession, onReconnect: reconnectSession, onSelect: () => selectSession(session.id) });
     $('#password').value = '';
     sessions.set(session.id, session);
     $('#session-tabs').append(session.tab);
     $('#sessions').append(session.root);
     selectSession(session.id);
     $('#global-status').textContent = `${sessions.size} open session${sessions.size === 1 ? '' : 's'}`;
+}
+function reconnectSession(session) {
+    // Reconnection is a new, explicit authentication, never stored-password retry.
+    // In particular, do not restore gatewayUrl from a profile or remote event.
+    const profile = sanitizeProfile(session.options);
+    closeSession(session);
+    clearGateway();
+    fillProfile(profile);
+    $('#form-message').textContent = 'Reconnect with fresh credentials. Verify the gateway address, paste its token, load its targets and enter your password again.';
+    gatewayInput.focus();
 }
 function currentProfile() { return sanitizeProfile({ ...Object.fromEntries(new FormData(form)), clipboard: $('#clipboard').checked, richClipboard: $('#rich-clipboard').checked, resize: $('#resize').checked, audio: $('#audio').checked }); }
 function fillProfile(profile) {
