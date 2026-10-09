@@ -92,7 +92,7 @@ function openSession(mode, options) {
     selectSession(session.id);
     $('#global-status').textContent = `${sessions.size} open session${sessions.size === 1 ? '' : 's'}`;
 }
-function currentProfile() { return sanitizeProfile({ ...Object.fromEntries(new FormData(form)), clipboard: $('#clipboard').checked, richClipboard: $('#rich-clipboard').checked, resize: $('#resize').checked }); }
+function currentProfile() { return sanitizeProfile({ ...Object.fromEntries(new FormData(form)), clipboard: $('#clipboard').checked, richClipboard: $('#rich-clipboard').checked, resize: $('#resize').checked, audio: $('#audio').checked }); }
 function fillProfile(profile) {
     showOverview();
     const p = sanitizeProfile(profile);

@@ -14,6 +14,7 @@ import { PointerCache } from './Pointer.js';
 import { parseBitmapUpdate, parsePalette } from './BitmapUpdate.js';
 import { encodeInput, unicodeEvents } from './InputEncoder.js';
 import { StaticChannels } from '../channels/StaticChannels.js';
+import { AudioOutputChannel } from '../channels/AudioOutputChannel.js';
 import { ClipboardChannel } from '../channels/ClipboardChannel.js';
 import { DynamicChannels } from '../channels/DynamicChannels.js';
 import { DisplayControl, DISPLAY_CHANNEL } from '../channels/DisplayControl.js';
@@ -23,8 +24,9 @@ export class Session {
         this.send = send;
         this.emit = emit;
         this.options = { width: 1280, height: 800, bpp: 24, clipboard: true, resize: true, selectedProtocol: 2, requestedProtocols: 2, ...options };
+        this.options.audio = this.options.audio === true;
         this.state = 'new';
-        this.channels = [...(this.options.clipboard ? ['cliprdr'] : []), ...(this.options.resize ? ['drdynvc'] : [])];
+        this.channels = [...(this.options.clipboard ? ['cliprdr'] : []), ...(this.options.resize ? ['drdynvc'] : []), ...(this.options.audio ? ['rdpsnd'] : [])];
         this.framer = new Framer((packet, kind) => this.packet(packet, kind));
         this.bulk = this.options.compression === false ? null : new MppcDecoder();
         this.fastPath = new FastPath((code, bytes) => this.fastUpdate(code, bytes), 16 * 1024 * 1024, this.bulk);
@@ -108,6 +110,10 @@ export class Session {
             if (name === 'cliprdr') {
                 this.clipboard = new ClipboardChannel(send, (kind, value) => this.emit({ ...value, type: 'clipboard', kind }), { rich: this.options.richClipboard === true });
                 this.staticChannels.register(id, this.clipboard);
+            }
+            if (name === 'rdpsnd') {
+                this.audio = new AudioOutputChannel(send, value => this.emit({ ...value, type: 'audio' }));
+                this.staticChannels.register(id, this.audio);
             }
             if (name === 'drdynvc') {
                 const factories = new Map([[DISPLAY_CHANNEL, sendDisplay => {
@@ -311,6 +317,7 @@ export class Session {
         for (let i = 0; i < events.length; i += 128)
             this.input(events.slice(i, i + 128));
     }
+    consumeAudio(id, disposition) { return this.audio?.consume(id, disposition) || false; }
     setClipboard(text) { requireThat(this.clipboard, 'CLIPBOARD_DISABLED', 'Clipboard was not enabled'); this.clipboard.setText(text); }
     setClipboardContent(content) { requireThat(this.state === 'active' && this.clipboard, 'CLIPBOARD_DISABLED', 'An active clipboard channel is required'); this.clipboard.setContent(content); }
     requestClipboardFormat(kind) { requireThat(this.state === 'active' && this.clipboard, 'CLIPBOARD_DISABLED', 'An active clipboard channel is required'); return this.clipboard.requestFormat(kind); }
@@ -320,7 +327,7 @@ export class Session {
         if (this.state === 'active')
             this.dataSend(33, new Writer().u8(1).zeros(3).u16le(0).u16le(0).u16le(this.desktop.width - 1).u16le(this.desktop.height - 1).finish());
     }
-    stats() { return { receivedBytes: this.receivedBytes, packets: this.receivedPackets, bitmapBytes: this.bitmapBytes, state: this.state }; }
+    stats() { return { receivedBytes: this.receivedBytes, packets: this.receivedPackets, bitmapBytes: this.bitmapBytes, state: this.state, audio: this.audio?.stats() || null }; }
     fail(error) {
         if (this.state === 'failed' || this.state === 'closed')
             return;

@@ -52,7 +52,9 @@ function event(value) {
     if (['desktop', 'bitmaps', 'palette', 'pointer'].includes(value.type))
         enqueue(value);
     else {
-        if (value.type === 'clipboard' && value.kind === 'image') {
+        if (value.type === 'audio' && value.kind === 'samples') {
+            postMessage(value, value.planes.map(plane => plane.buffer));
+        } else if (value.type === 'clipboard' && value.kind === 'image') {
             const pixels = value.bytes || value.rgba;
             postMessage(value, [pixels.buffer]); // Clipboard decoders return owned buffers.
         } else send(value);
@@ -223,6 +225,8 @@ onmessage = received => {
             session?.input(message.events);
         else if (message.type === 'text')
             session?.text(message.text);
+        else if (message.type === 'audio-consumed')
+            session?.consumeAudio(message.id, message.disposition);
         else if (message.type === 'clipboard')
             session?.setClipboard(message.text);
         else if (message.type === 'clipboard-content') {
